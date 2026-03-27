@@ -614,7 +614,9 @@ def create_poster(
     if show_contours:
         log_message("Downloading elevation data and rendering contours...", callback, 70)
         try:
+            from pyproj import Transformer
             west, south, east, north = bbox_tuple
+            # 30x30 grid (900 points) is perfect for aesthetics
             grid_size = 30
             lats = np.linspace(south, north, grid_size)
             lons = np.linspace(west, east, grid_size)
@@ -622,11 +624,11 @@ def create_poster(
             
             flat_lats = lat_grid.flatten()
             flat_lons = lon_grid.flatten()
-            all_elevations = []
+            all_elevations = np.zeros_like(flat_lats)
             
-            # Use smaller batches and retries for maximum reliability
-            batch_size = 50
-            last_valid_elev = 0
+            # API Settings
+            batch_size = 100 # Max allowed by Open-Meteo
+            headers = {'User-Agent': 'AesthetiMap/1.0 (https://aesthetimap.rastiegaiev.com)'}
             
             for i in range(0, len(flat_lats), batch_size):
                 batch_lats = flat_lats[i:i + batch_size]
@@ -636,44 +638,40 @@ def create_poster(
                 lons_str = ",".join([f"{lon:.4f}" for lon in batch_lons])
                 url = f"https://api.open-meteo.com/v1/elevation?latitude={lats_str}&longitude={lons_str}"
                 
-                # Retry logic
                 success = False
-                for attempt in range(2):
+                for attempt in range(3): # 3 retries
                     try:
-                        response = requests.get(url, timeout=10)
+                        response = requests.get(url, headers=headers, timeout=15)
                         if response.status_code == 200:
                             batch_elevs = response.json().get("elevation", [])
                             if batch_elevs:
-                                all_elevations.extend(batch_elevs)
-                                last_valid_elev = batch_elevs[-1]
+                                all_elevations[i:i + len(batch_elevs)] = batch_elevs
                                 success = True
                                 break
+                        elif response.status_code == 429: # Rate limit
+                            time.sleep(2.0 * (attempt + 1))
                     except Exception:
-                        time.sleep(0.5)
+                        time.sleep(1.0 * (attempt + 1))
                 
                 if not success:
-                    log_message(f"⚠ Elevation batch {i//batch_size} failed. Using fallback.", callback)
-                    all_elevations.extend([last_valid_elev] * len(batch_lats))
+                    log_message(f"⚠ Elevation batch {i//batch_size} failed after retries.", callback)
                 
-                time.sleep(0.3) # Respect API limits
+                time.sleep(0.6) # Gentle delay between batches
 
-            if len(all_elevations) == len(flat_lats):
-                elevations = np.array(all_elevations).reshape(lat_grid.shape)
-                
-                x_grid = np.zeros_like(lon_grid)
-                y_grid = np.zeros_like(lat_grid)
-                for i in range(lat_grid.shape[0]):
-                    for j in range(lat_grid.shape[1]):
-                        p = ox.projection.project_geometry(Point(lon_grid[i,j], lat_grid[i,j]), crs="EPSG:4326", to_crs=g_proj.graph["crs"])
-                        if isinstance(p, tuple): p = p[0]
-                        x_grid[i,j], y_grid[i,j] = p.x, p.y
-                
-                min_elev, max_elev = np.min(elevations), np.max(elevations)
-                if max_elev - min_elev > 5:
-                    # zorder=0.7 puts it behind roads (6.0), buildings (3.0), and parks (0.8)
-                    ax.contour(x_grid, y_grid, elevations, levels=25, colors=THEME['text'], alpha=0.2, linewidths=0.4, zorder=0.7)
-                else:
-                    log_message("ℹ Elevation range too small for contours", callback)
+            elevations = all_elevations.reshape(lat_grid.shape)
+            
+            # Fast vectorized projection using pyproj
+            transformer = Transformer.from_crs("EPSG:4326", g_proj.graph["crs"], always_xy=True)
+            x_flat, y_flat = transformer.transform(flat_lons, flat_lats)
+            x_grid = x_flat.reshape(lon_grid.shape)
+            y_grid = y_flat.reshape(lat_grid.shape)
+            
+            min_elev, max_elev = np.min(elevations), np.max(elevations)
+            if max_elev - min_elev > 5:
+                # Thin and subtle lines
+                ax.contour(x_grid, y_grid, elevations, levels=25, colors=THEME['text'], alpha=0.2, linewidths=0.4, zorder=0.7)
+            else:
+                log_message("ℹ Elevation range too small for contours", callback)
         except Exception as e:
             log_message(f"⚠ Elevation rendering failed: {e}", callback)
 
