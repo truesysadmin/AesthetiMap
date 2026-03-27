@@ -391,7 +391,7 @@ def get_crop_limits(g_proj, center_lat_lon, fig, span):
             Point(lon, lat),
             crs="EPSG:4326",
             to_crs=g_proj.graph["crs"]
-        )[0]
+        )
     )
     center_x, center_y = center.x, center.y
 
@@ -623,7 +623,7 @@ def create_poster(
                 y_grid = np.zeros_like(lat_grid)
                 for i in range(lat_grid.shape[0]):
                     for j in range(lat_grid.shape[1]):
-                        p = ox.projection.project_geometry(Point(lon_grid[i,j], lat_grid[i,j]), crs="EPSG:4326", to_crs=g_proj.graph["crs"])[0]
+                        p = ox.projection.project_geometry(Point(lon_grid[i,j], lat_grid[i,j]), crs="EPSG:4326", to_crs=g_proj.graph["crs"])
                         x_grid[i,j], y_grid[i,j] = p.x, p.y
                 
                 # Render contours with higher visibility
