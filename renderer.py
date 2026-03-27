@@ -666,7 +666,6 @@ def create_poster(
         edge_linewidth=edge_widths,
         show=False,
         close=False,
-        zorder=4, # Ensure roads are on top of buildings
     )
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
