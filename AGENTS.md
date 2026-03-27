@@ -57,3 +57,5 @@ Follow the conventional commit format observed in the repository:
 - `refactor:` for code restructuring (e.g., `refactor: rename Map Radius to Span`)
 - `fix:` for bug fixes
 - `docs:` for documentation updates
+
+All text in all files have to be in English

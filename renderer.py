@@ -19,13 +19,14 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, cast, Callable
+from typing import Optional, cast, Callable, Dict, Any
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
 import pandas as pd
+from pyproj import Transformer
 from geopandas import GeoDataFrame
 from geopy.distance import distance
 from geopy.geocoders import Nominatim
@@ -212,7 +213,7 @@ def load_theme(theme_name="terracotta"):
 
 
 # Load theme (can be changed via command line or input)
-THEME = {}  # Will be loaded later
+# theme is now passed as an argument to rendering functions for thread safety.
 
 
 def log_message(msg: str, callback: Optional[Callable[[str, Optional[int]], None]] = None, progress: Optional[int] = None):
@@ -267,7 +268,7 @@ def create_gradient_fade(ax, color, location="bottom", zorder=10):
     )
 
 
-def get_edge_colors_by_type(g):
+def get_edge_colors_by_type(g, theme: Dict[str, Any]):
     """
     Assigns colors to edges based on road type hierarchy.
     Returns a list of colors corresponding to each edge in the graph.
@@ -284,17 +285,17 @@ def get_edge_colors_by_type(g):
 
         # Assign color based on road type
         if highway in ["motorway", "motorway_link"]:
-            color = THEME["road_motorway"]
+            color = theme["road_motorway"]
         elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
-            color = THEME["road_primary"]
+            color = theme["road_primary"]
         elif highway in ["secondary", "secondary_link"]:
-            color = THEME["road_secondary"]
+            color = theme["road_secondary"]
         elif highway in ["tertiary", "tertiary_link"]:
-            color = THEME["road_tertiary"]
+            color = theme["road_tertiary"]
         elif highway in ["residential", "living_street", "unclassified"]:
-            color = THEME["road_residential"]
+            color = theme["road_residential"]
         else:
-            color = THEME['road_default']
+            color = theme.get('road_default', theme.get('road_tertiary', '#888888'))
 
         edge_colors.append(color)
 
@@ -480,8 +481,9 @@ def create_poster(
     span,
     output_file,
     output_format,
-    width=12,
-    height=16,
+    theme: Dict[str, Any],
+    width=12.0,
+    height=16.0,
     country_label=None,
     name_label=None,
     display_city=None,
@@ -518,14 +520,12 @@ def create_poster(
     Raises:
         RuntimeError: If street network data cannot be retrieved
     """
-    global THEME
-    
     # Handle display names for i18n support
     # Priority: display_city/display_country > name_label/country_label > city/country
     display_city = display_city or name_label or city
     display_country = display_country or country_label or country
 
-    log_message(f"--- Generating Map for {city}, {country} ---", callback, 5)
+    log_message(f"--- Generating Map for {city}, {country} ---", callback, 2)
 
     log_message("Calculating optimal bounding box...", callback, 5)
     aspect = width / height
@@ -546,13 +546,13 @@ def create_poster(
     bbox_tuple = (west, south, east, north)
 
     # 1. Fetch Street Network
-    log_message("Downloading street network...", callback, 10)
+    log_message("Downloading street network from OSM...", callback, 10)
     g = fetch_graph(bbox_tuple)
     if g is None:
         raise RuntimeError("Failed to retrieve street network data.")
 
     # 2. Fetch Water Features
-    log_message("Downloading water features...", callback, 40)
+    log_message("Downloading water features...", callback, 25)
     water = fetch_features(
         bbox_tuple,
         tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
@@ -560,7 +560,7 @@ def create_poster(
     )
 
     # 3. Fetch Parks
-    log_message("Downloading parks and green spaces...", callback, 60)
+    log_message("Downloading green areas...", callback, 35)
     parks = fetch_features(
         bbox_tuple,
         tags={"leisure": "park", "landuse": "grass"},
@@ -570,7 +570,7 @@ def create_poster(
     # 4. Fetch Buildings (Optional)
     buildings = None
     if show_buildings:
-        log_message("Downloading building footprints...", callback, 65)
+        log_message("Downloading building footprints...", callback, 45)
         buildings = fetch_features(
             bbox_tuple,
             tags={"building": True},
@@ -578,106 +578,113 @@ def create_poster(
         )
 
     log_message("Rendering layers and road hierarchies...", callback, 75)
-    fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME["bg"])
-    ax.set_facecolor(THEME["bg"])
+    fig, ax = plt.subplots(figsize=(width, height), facecolor=theme["bg"])
+    ax.set_facecolor(theme["bg"])
     ax.set_position((0.0, 0.0, 1.0, 1.0))
 
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     g_proj = ox.project_graph(g)
 
-    # 3. Plot Layers
-    # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
+    # Layer 1: Water and Green Spaces
     if water is not None and not water.empty:
-        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
-            # Project water features in the same CRS as the graph
             try:
                 water_polys = ox.projection.project_gdf(water_polys)
             except Exception:
                 water_polys = water_polys.to_crs(g_proj.graph['crs'])
-            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
-
+            water_polys.plot(ax=ax, facecolor=theme['water'], edgecolor='none', zorder=0.5)
+            
     if parks is not None and not parks.empty:
-        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
-            # Project park features in the same CRS as the graph
             try:
                 parks_polys = ox.projection.project_gdf(parks_polys)
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
-            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+            parks_polys.plot(ax=ax, facecolor=theme['parks'], edgecolor='none', zorder=0.8)
             
     # Layer 1.5: Elevation Contours (Optional)
     # Render here to be under roads and buildings
     if show_contours:
-        log_message("Downloading elevation data and rendering contours...", callback, 70)
+        log_message("Downloading SRTM elevation data...", callback, 55)
         try:
-            from pyproj import Transformer
+            import elevation
+            import rasterio
+            from rasterio.transform import rowcol
+
             west, south, east, north = bbox_tuple
-            # 30x30 grid (900 points) is perfect for aesthetics
-            grid_size = 30
-            lats = np.linspace(south, north, grid_size)
-            lons = np.linspace(west, east, grid_size)
-            lon_grid, lat_grid = np.meshgrid(lons, lats)
-            
-            flat_lats = lat_grid.flatten()
-            flat_lons = lon_grid.flatten()
-            all_elevations = np.zeros_like(flat_lats)
-            
-            # API Settings
-            batch_size = 100 # Max allowed by Open-Meteo
-            headers = {'User-Agent': 'AesthetiMap/1.0 (https://aesthetimap.rastiegaiev.com)'}
-            
-            for i in range(0, len(flat_lats), batch_size):
-                batch_lats = flat_lats[i:i + batch_size]
-                batch_lons = flat_lons[i:i + batch_size]
-                
-                lats_str = ",".join([f"{lat:.4f}" for lat in batch_lats])
-                lons_str = ",".join([f"{lon:.4f}" for lon in batch_lons])
-                url = f"https://api.open-meteo.com/v1/elevation?latitude={lats_str}&longitude={lons_str}"
-                
-                success = False
-                for attempt in range(3): # 3 retries
-                    try:
-                        response = requests.get(url, headers=headers, timeout=15)
-                        if response.status_code == 200:
-                            batch_elevs = response.json().get("elevation", [])
-                            if batch_elevs:
-                                all_elevations[i:i + len(batch_elevs)] = batch_elevs
-                                success = True
-                                break
-                        elif response.status_code == 429: # Rate limit
-                            time.sleep(2.0 * (attempt + 1))
-                    except Exception:
-                        time.sleep(1.0 * (attempt + 1))
-                
-                if not success:
-                    log_message(f"⚠ Elevation batch {i//batch_size} failed after retries.", callback)
-                
-                time.sleep(0.6) # Gentle delay between batches
+            # Add small buffer to avoid edge interpolation artifacts
+            buf = 0.01
+            bounds = (west - buf, south - buf, east + buf, north + buf)
+
+            # Use a slugified bounding box as cache key for the GeoTIFF
+            bbox_slug = f"{south:.3f}_{west:.3f}_{north:.3f}_{east:.3f}".replace("-", "m").replace(".", "d")
+            dem_path = os.path.join(CACHE_DIR_PATH, f"srtm_{bbox_slug}.tif")
+
+            if not os.path.exists(dem_path):
+                log_message("  Fetching SRTM30 tiles from NASA/USGS...", callback, 60)
+                elevation.clip(bounds=bounds, output=os.path.abspath(dem_path), product="SRTM1")
+                elevation.clean()
+            else:
+                log_message("  ✓ Using cached SRTM elevation data", callback, 60)
+
+            log_message("Processing topography contours...", callback, 75)
+
+            with rasterio.open(dem_path) as src:
+                # Sample a regular grid projected in the graph CRS
+                grid_size = 60
+                lats = np.linspace(south, north, grid_size)
+                lons = np.linspace(west, east, grid_size)
+                lon_grid, lat_grid = np.meshgrid(lons, lats)
+                flat_lons = lon_grid.flatten()
+                flat_lats = lat_grid.flatten()
+
+                # Read elevation values via row/col lookup (fast, vectorized)
+                rows, cols = rowcol(src.transform, flat_lons, flat_lats)
+                rows = np.clip(rows, 0, src.height - 1)
+                cols = np.clip(cols, 0, src.width - 1)
+                data = src.read(1)
+                all_elevations = data[rows, cols].astype(float)
+
+                # Replace SRTM nodata values with NaN then interpolate
+                nodata = src.nodata or -32768
+                all_elevations[all_elevations == nodata] = np.nan
+                if np.isnan(all_elevations).any():
+                    nans = np.isnan(all_elevations)
+                    valid = ~nans
+                    if valid.any():
+                        all_elevations[nans] = np.interp(
+                            np.flatnonzero(nans), np.flatnonzero(valid), all_elevations[valid]
+                        )
 
             elevations = all_elevations.reshape(lat_grid.shape)
-            
-            # Fast vectorized projection using pyproj
-            transformer = Transformer.from_crs("EPSG:4326", g_proj.graph["crs"], always_xy=True)
+
+            # Project grid to graph CRS for plotting
+            target_crs = g_proj.graph["crs"]
+            transformer = Transformer.from_crs("EPSG:4326", target_crs, always_xy=True)
             x_flat, y_flat = transformer.transform(flat_lons, flat_lats)
             x_grid = x_flat.reshape(lon_grid.shape)
             y_grid = y_flat.reshape(lat_grid.shape)
-            
-            min_elev, max_elev = np.min(elevations), np.max(elevations)
+
+            min_elev, max_elev = np.nanmin(elevations), np.nanmax(elevations)
+            log_message(f"  Elevation range: {min_elev:.0f}m – {max_elev:.0f}m", callback)
             if max_elev - min_elev > 5:
-                # Thin and subtle lines
-                ax.contour(x_grid, y_grid, elevations, levels=25, colors=THEME['text'], alpha=0.2, linewidths=0.4, zorder=0.7)
+                ax.contour(
+                    x_grid, y_grid, elevations, levels=25,
+                    colors=theme['text'], alpha=0.22, linewidths=0.45, zorder=0.7
+                )
             else:
                 log_message("ℹ Elevation range too small for contours", callback)
         except Exception as e:
             log_message(f"⚠ Elevation rendering failed: {e}", callback)
+            import traceback
+            traceback.print_exc()
+
 
     # Layer 2: Roads with hierarchy coloring
     log_message("Applying road hierarchy colors...", callback, 80)
-    edge_colors = get_edge_colors_by_type(g_proj)
+    edge_colors = get_edge_colors_by_type(g_proj, theme)
     edge_widths = get_edge_widths_by_type(g_proj)
 
     # Determine cropping limits to maintain the poster aspect ratio
@@ -685,21 +692,23 @@ def create_poster(
 
     # Draw Buildings (Layer 2)
     if buildings is not None and not buildings.empty:
+        log_message("Rendering building footprints...", callback, 88)
         try:
             buildings_proj = ox.projection.project_gdf(buildings)
             # Render Shadow
             shadow_offset = 0.03 * (span / width)
             buildings_proj.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
-                ax=ax, facecolor=THEME.get('text', '#000000'), alpha=0.15, edgecolor='none', zorder=2
+                ax=ax, facecolor=theme.get('text', '#000000'), alpha=0.15, edgecolor='none', zorder=2
             )
             # Render Building
-            buildings_proj.plot(ax=ax, facecolor=THEME.get('building', THEME['road_residential']), edgecolor='none', zorder=3)
+            buildings_proj.plot(ax=ax, facecolor=theme.get('building', theme['road_residential']), edgecolor='none', zorder=3)
         except Exception as e:
             log_message(f"⚠ Building rendering failed: {e}", callback)
 
     # Plot the projected graph and then apply the cropped limits
+    log_message("Finalizing map rendering...", callback, 92)
     ox.plot_graph(
-        g_proj, ax=ax, bgcolor=THEME['bg'],
+        g_proj, ax=ax, bgcolor=theme['bg'],
         node_size=0,
         edge_color=edge_colors,
         edge_linewidth=edge_widths,
@@ -713,11 +722,11 @@ def create_poster(
 
     # Layer 3: Gradients
     if gradient_tb:
-        create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
-        create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
+        create_gradient_fade(ax, theme['gradient_color'], location='bottom', zorder=10)
+        create_gradient_fade(ax, theme['gradient_color'], location='top', zorder=10)
     if gradient_lr:
-        create_gradient_fade(ax, THEME['gradient_color'], location='left', zorder=10)
-        create_gradient_fade(ax, THEME['gradient_color'], location='right', zorder=10)
+        create_gradient_fade(ax, theme['gradient_color'], location='left', zorder=10)
+        create_gradient_fade(ax, theme['gradient_color'], location='right', zorder=10)
 
     # Typography
     scale_factor = min(height, width) / 12.0
@@ -762,22 +771,22 @@ def create_poster(
         y_city, y_sep, y_country, y_coords = 0.14, 0.125, 0.10, 0.07
 
     if not no_title:
-        ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=THEME["text"], ha="center", fontproperties=font_main_adjusted, zorder=11)
-        ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=THEME["text"], ha="center", fontproperties=font_sub, zorder=11)
-        ax.plot([0.4, 0.6], [y_sep, y_sep], transform=ax.transAxes, color=THEME["text"], linewidth=1 * scale_factor, zorder=11)
+        ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_main_adjusted, zorder=11)
+        ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_sub, zorder=11)
+        ax.plot([0.4, 0.6], [y_sep, y_sep], transform=ax.transAxes, color=theme["text"], linewidth=1 * scale_factor, zorder=11)
 
     if not no_coords:
         lat, lon = point
         coords_text = f"{lat:.4f}° N / {lon:.4f}° E" if lat >= 0 else f"{abs(lat):.4f}° S / {lon:.4f}° E"
         if lon < 0: coords_text = coords_text.replace("E", "W")
-        ax.text(0.5, y_coords, coords_text, transform=ax.transAxes, color=THEME["text"], alpha=0.7, ha="center", fontproperties=font_coords, zorder=11)
+        ax.text(0.5, y_coords, coords_text, transform=ax.transAxes, color=theme["text"], alpha=0.7, ha="center", fontproperties=font_coords, zorder=11)
 
-    ax.text(0.98, 0.02, "aesthetimap.rastiegaiev.com", transform=ax.transAxes, color=THEME["text"], alpha=0.5, ha="right", va="bottom", fontproperties=font_attr, zorder=11)
+    ax.text(0.98, 0.02, "aesthetimap.rastiegaiev.com", transform=ax.transAxes, color=theme["text"], alpha=0.5, ha="right", va="bottom", fontproperties=font_attr, zorder=11)
 
     # 5. Save
     log_message(f"Saving to {output_file}...", callback, 95)
     fmt = output_format.lower()
-    save_kwargs = dict(facecolor=THEME["bg"], bbox_inches="tight", pad_inches=0.05)
+    save_kwargs = dict(facecolor=theme["bg"], bbox_inches="tight", pad_inches=0.05)
     if fmt == "png": save_kwargs["dpi"] = 300
     plt.savefig(output_file, format=fmt, **save_kwargs)
     plt.close()
@@ -808,17 +817,17 @@ def run_generator(
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """Entry point for library calls."""
-    global THEME
     custom_fonts = load_fonts(font_family) if font_family else None
     if latitude and longitude:
         coords = (parse(latitude), parse(longitude))
     else:
         coords = get_coordinates(city, country)
 
-    THEME = load_theme(theme)
+    loaded_theme = load_theme(theme)
     output_file = generate_output_filename(city, theme, output_format)
     create_poster(
         city, country, coords, span, output_file, output_format,
+        theme=loaded_theme,
         width=width, height=height, country_label=country_label,
         display_city=display_city, display_country=display_country,
         fonts=custom_fonts, no_title=no_title, no_coords=no_coords,

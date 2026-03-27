@@ -2,10 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies needed for geopy, matplotlib, etc.
+# Install system dependencies needed for geopy, matplotlib, rasterio (GDAL), etc.
 RUN apt-get update && apt-get install -y \
     build-essential \
     libgeos-dev \
+    gdal-bin \
+    libgdal-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements wrapper
