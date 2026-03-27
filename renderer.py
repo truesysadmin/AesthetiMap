@@ -609,57 +609,6 @@ def create_poster(
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
             
-    # Layer 1.5: Elevation Contours (Optional)
-    if show_contours:
-        log_message("Downloading elevation data and rendering contours...", callback, 70)
-        # Get a grid of elevation points
-        try:
-            west, south, east, north = bbox_tuple
-            # Use a denser grid for smoother contours
-            lats = np.linspace(south, north, 30)
-            lons = np.linspace(west, east, 30)
-            lon_grid, lat_grid = np.meshgrid(lons, lats)
-            
-            # Open-Meteo elevation API expects comma-separated lat,lon pairs
-            url = f"https://api.open-meteo.com/v1/elevation?latitude={','.join([f'{lat:.4f}' for lat in lat_grid.flatten()])}&longitude={','.join([f'{lon:.4f}' for lon in lon_grid.flatten()])}"
-            
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                elevations = np.array(response.json()["elevation"]).reshape(lat_grid.shape)
-                
-                # Project the grid for plotting
-                x_grid = np.zeros_like(lon_grid)
-                y_grid = np.zeros_like(lat_grid)
-                for i in range(lat_grid.shape[0]):
-                    for j in range(lat_grid.shape[1]):
-                        p = ox.projection.project_geometry(Point(lon_grid[i,j], lat_grid[i,j]), crs="EPSG:4326", to_crs=g_proj.graph["crs"])
-                        if isinstance(p, tuple):
-                            p = p[0]
-                        x_grid[i,j], y_grid[i,j] = p.x, p.y
-                
-                # Render contours
-                ax.contour(x_grid, y_grid, elevations, levels=25, colors=THEME['text'], alpha=0.5, linewidths=1.0, zorder=1.1)
-        except Exception as e:
-            log_message(f"⚠ Elevation rendering failed: {e}", callback)
-
-    # Layer 2: Buildings (Optional)
-    if buildings is not None and not buildings.empty:
-        # Filter to only polygon/multipolygon geometries
-        buildings_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
-        if not buildings_polys.empty:
-            try:
-                buildings_polys = ox.projection.project_gdf(buildings_polys)
-            except Exception:
-                buildings_polys = buildings_polys.to_crs(g_proj.graph['crs'])
-                
-            # Render Shadow
-            shadow_offset = 0.03 * (span / width) 
-            buildings_polys.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
-                ax=ax, facecolor=THEME.get('text', '#000000'), alpha=0.15, edgecolor='none', zorder=2
-            )
-            # Render Building
-            buildings_polys.plot(ax=ax, facecolor=THEME.get('building', THEME['road_residential']), edgecolor='none', zorder=3)
-
     # Layer 2: Roads with hierarchy coloring
     log_message("Applying road hierarchy colors...", callback, 80)
     edge_colors = get_edge_colors_by_type(g_proj)
@@ -679,6 +628,40 @@ def create_poster(
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
+
+    # Layer 2.5: Elevation Contours (Optional)
+    # Render after roads to ensure visibility
+    if show_contours:
+        log_message("Downloading elevation data and rendering contours...", callback, 82)
+        # Get a grid of elevation points
+        try:
+            west, south, east, north = bbox_tuple
+            # Use a denser grid for smoother contours
+            lats = np.linspace(south, north, 40)
+            lons = np.linspace(west, east, 40)
+            lon_grid, lat_grid = np.meshgrid(lons, lats)
+            
+            # Open-Meteo elevation API expects comma-separated lat,lon pairs
+            url = f"https://api.open-meteo.com/v1/elevation?latitude={','.join([f'{lat:.4f}' for lat in lat_grid.flatten()])}&longitude={','.join([f'{lon:.4f}' for lon in lon_grid.flatten()])}"
+            
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                elevations = np.array(response.json()["elevation"]).reshape(lat_grid.shape)
+                
+                # Project the grid for plotting
+                x_grid = np.zeros_like(lon_grid)
+                y_grid = np.zeros_like(lat_grid)
+                for i in range(lat_grid.shape[0]):
+                    for j in range(lat_grid.shape[1]):
+                        p = ox.projection.project_geometry(Point(lon_grid[i,j], lat_grid[i,j]), crs="EPSG:4326", to_crs=g_proj.graph["crs"])
+                        if isinstance(p, tuple):
+                            p = p[0]
+                        x_grid[i,j], y_grid[i,j] = p.x, p.y
+                
+                # Render contours with high zorder and better visibility
+                ax.contour(x_grid, y_grid, elevations, levels=20, colors=THEME['text'], alpha=0.6, linewidths=0.8, zorder=7)
+        except Exception as e:
+            log_message(f"⚠ Elevation rendering failed: {e}", callback)
 
     # Layer 3: Gradients
     if gradient_tb:
