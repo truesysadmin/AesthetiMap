@@ -1,0 +1,15 @@
+{
+  "name": "Psychedelic",
+  "description": "Vibrant, shifting neon colors and surreal contrasting tones",
+  "bg": "#4A0E4E",
+  "text": "#00FFFF",
+  "gradient_color": "#4A0E4E",
+  "water": "#FF00FF",
+  "parks": "#00FF00",
+  "road_motorway": "#FF4500",
+  "road_primary": "#FFD700",
+  "road_secondary": "#FF1493",
+  "road_tertiary": "#00FA9A",
+  "road_residential": "#1E90FF",
+  "road_default": "#FF69B4"
+}

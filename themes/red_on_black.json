@@ -1,0 +1,15 @@
+{
+  "name": "Red on Black",
+  "description": "Pure deep black background with glowing crimson red roads",
+  "bg": "#050505",
+  "text": "#E60000",
+  "gradient_color": "#050505",
+  "water": "#0A0A0A",
+  "parks": "#080808",
+  "road_motorway": "#FF0000",
+  "road_primary": "#E60000",
+  "road_secondary": "#B30000",
+  "road_tertiary": "#800000",
+  "road_residential": "#4D0000",
+  "road_default": "#660000"
+}

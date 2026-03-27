@@ -1,0 +1,48 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    expose:
+      - "8000"
+    environment:
+      - MAX_CLEANUP_DAYS=7
+      - MAX_CLEANUP_MB=1024
+      - CLEANUP_INTERVAL_HOURS=6
+    volumes:
+      - ./cache:/app/cache
+      - ./posters:/app/posters
+    restart: unless-stopped
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          cpus: '8.0'
+          memory: '8192M'
+        reservations:
+          cpus: '4.0'
+          memory: '4096M'
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    expose:
+      - "80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - internal
+      - contolstation
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: '256M'
+
+networks:
+  internal:
+  contolstation:
+    external: true

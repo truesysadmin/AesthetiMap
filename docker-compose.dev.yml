@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - MAX_CLEANUP_DAYS=7
+      - MAX_CLEANUP_MB=1024
+      - CLEANUP_INTERVAL_HOURS=6
+    volumes:
+      - ./cache:/app/cache
+      - ./posters:/app/posters
+    restart: unless-stopped
+    networks:
+      - internal
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - internal
+
+networks:
+  internal:

@@ -1,0 +1,15 @@
+{
+  "name": "Gold on Porcelain",
+  "description": "Delicate gold veins on warm ivory porcelain — timeless luxury",
+  "bg": "#FDFBF5",
+  "text": "#C8A84B",
+  "gradient_color": "#FDFBF5",
+  "water": "#F0EDE4",
+  "parks": "#F5F3EA",
+  "road_motorway": "#D4AF37",
+  "road_primary": "#C9A828",
+  "road_secondary": "#D4B84A",
+  "road_tertiary": "#E0CA7A",
+  "road_residential": "#EADA9E",
+  "road_default": "#E8D898"
+}
