@@ -1,5 +1,4 @@
 import os
-import subprocess
 import glob
 import json
 import asyncio
@@ -8,13 +7,80 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
+from typing import Optional, Dict
+import sys
+
+# Add root directory to sys.path to import renderer
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import renderer
 
 app = FastAPI(title="AesthetiMap API")
 
 MAX_AGE_DAYS = float(os.getenv("MAX_CLEANUP_DAYS", "7"))
 MAX_SIZE_MB = float(os.getenv("MAX_CLEANUP_MB", "1024")) # default 1 GB
 CLEANUP_INTERVAL_HOURS = float(os.getenv("CLEANUP_INTERVAL_HOURS", "6"))
+NUM_WORKERS = int(os.getenv("NUM_WORKERS", "2"))
+
+# Task queue and event storage
+task_queue = asyncio.Queue()
+task_events: Dict[str, asyncio.Queue] = {}
+
+async def worker():
+    """Worker to process map generation tasks."""
+    while True:
+        task_data = await task_queue.get()
+        task_id = task_data["task_id"]
+        req = task_data["request"]
+        event_queue = task_events.get(task_id)
+
+        def callback(message: str, progress: Optional[int] = None):
+            if event_queue:
+                data = {"type": "log", "message": message}
+                if progress is not None:
+                    data = {"type": "progress", "percent": progress, "message": message}
+                asyncio.run_coroutine_threadsafe(event_queue.put(data), asyncio.get_event_loop())
+
+        try:
+            # Run the heavy rendering in a thread pool to avoid blocking the event loop
+            loop = asyncio.get_running_loop()
+            result_file = await loop.run_in_executor(
+                None,
+                lambda: renderer.run_generator(
+                    city=req.city,
+                    country=req.country,
+                    theme=req.theme,
+                    span=req.span,
+                    width=req.width,
+                    height=req.height,
+                    output_format=req.format,
+                    latitude=req.latitude,
+                    longitude=req.longitude,
+                    no_title=req.no_title,
+                    no_coords=req.no_coords,
+                    gradient_tb=req.gradient_tb,
+                    gradient_lr=req.gradient_lr,
+                    text_position=req.text_position,
+                    country_label=req.country_label,
+                    display_city=req.display_city,
+                    display_country=req.display_country,
+                    show_buildings=req.show_buildings,
+                    show_contours=req.show_contours,
+                    callback=callback
+                )
+            )
+            if event_queue:
+                filename = os.path.basename(result_file)
+                await event_queue.put({"type": "done", "url": f"/api/posters/{filename}"})
+        except Exception as e:
+            print(f"Error in worker for task {task_id}: {e}")
+            if event_queue:
+                await event_queue.put({"type": "error", "message": str(e)})
+        finally:
+            task_queue.task_done()
+            # Clean up event queue after some time to allow the stream to finish
+            await asyncio.sleep(10)
+            if task_id in task_events:
+                del task_events[task_id]
 
 async def cleanup_loop():
     while True:
@@ -66,6 +132,9 @@ async def cleanup_loop():
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(cleanup_loop())
+    # Start workers
+    for _ in range(NUM_WORKERS):
+        asyncio.create_task(worker())
 
 app.add_middleware(
     CORSMiddleware,
@@ -105,79 +174,38 @@ def get_themes():
     return {"themes": sorted(themes)}
 
 @app.post("/api/generate_map_stream")
-def generate_map_stream(req: GenerateRequest):
-    def iter_output():
-        cmd = ["python", "-u", "renderer.py", "-c", req.city, "-C", req.country]
+async def generate_map_stream(req: GenerateRequest):
+    # Create unique task ID
+    task_id = f"task_{int(time.time() * 1000)}"
+    
+    # Initialize event queue for this task
+    event_queue = asyncio.Queue()
+    task_events[task_id] = event_queue
+    
+    # Add task to queue
+    await task_queue.put({
+        "task_id": task_id,
+        "request": req
+    })
+    
+    async def iter_output():
+        # Inform the user they are in the queue
+        yield json.dumps({"type": "log", "message": "Task queued, waiting for worker..."}) + "\n"
         
-        if req.latitude and req.longitude:
-            cmd.extend(["-lat", req.latitude, "-long", req.longitude])
-            
-        cmd.extend([
-            "-t", req.theme,
-            "-d", str(req.span),
-            "-W", str(req.width),
-            "-H", str(req.height),
-            "-f", req.format
-        ])
-        
-        if req.no_title:
-            cmd.append("--no-title")
-        if req.no_coords:
-            cmd.append("--no-coords")
-        if req.gradient_tb:
-            cmd.append("--gradient-tb")
-        if req.gradient_lr:
-            cmd.append("--gradient-lr")
-        if req.text_position and req.text_position != "bottom":
-            cmd.extend(["--text-position", req.text_position])
-        if req.country_label:
-            cmd.extend(["--country-label", req.country_label])
-        if req.display_city:
-            cmd.extend(["-dc", req.display_city])
-        if req.display_country:
-            cmd.extend(["-dC", req.display_country])
-        if req.show_buildings:
-            cmd.append("--show-buildings")
-        if req.show_contours:
-            cmd.append("--show-contours")
-            
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-        
-        for line in iter(process.stdout.readline, ""):
-            if line:
-                clean_line = line.replace('\r', '').replace('\n', '')
-                if clean_line.strip():
-                    if clean_line.startswith("[PROGRESS]"):
-                        parts = clean_line.replace("[PROGRESS] ", "").split("|", 1)
-                        if len(parts) == 2:
-                            yield json.dumps({
-                                "type": "progress", 
-                                "percent": int(parts[0].strip()),
-                                "message": parts[1].strip()
-                            }) + "\n"
-                        continue
-                        
-                    yield json.dumps({"type": "log", "message": clean_line}) + "\n"
-        
-        process.wait()
-        
-        if process.returncode != 0:
-            yield json.dumps({"type": "error", "message": "Script execution failed."}) + "\n"
-            return
-            
-        # Search for the recently created poster with the exact pattern:
-        # {city_slug}_{theme_name}_{timestamp}.{ext}
-        # Note: city_slug might be multiple words connected by underscores.
-        # To be safe, we just use glob pattern matching the theme and extension.
-        search_pattern = f"posters/*_{req.theme}_*.{req.format}"
-        files = glob.glob(search_pattern)
-        files.sort(key=os.path.getmtime, reverse=True)
-        
-        if not files:
-            yield json.dumps({"type": "error", "message": f"File not found with pattern: {search_pattern}"}) + "\n"
-        else:
-            latest_file = os.path.basename(files[0])
-            yield json.dumps({"type": "done", "url": f"/api/posters/{latest_file}"}) + "\n"
+        while True:
+            try:
+                # Wait for events from the worker
+                event = await asyncio.wait_for(event_queue.get(), timeout=300)
+                yield json.dumps(event) + "\n"
+                
+                if event["type"] in ["done", "error"]:
+                    break
+            except asyncio.TimeoutError:
+                yield json.dumps({"type": "error", "message": "Generation timed out."}) + "\n"
+                break
+            except Exception as e:
+                yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+                break
 
     return StreamingResponse(iter_output(), media_type="application/x-ndjson")
 

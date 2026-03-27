@@ -16,9 +16,10 @@ import glob
 import requests
 import sys
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, cast
+from typing import Optional, cast, Callable
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -211,7 +212,14 @@ def load_theme(theme_name="terracotta"):
 
 
 # Load theme (can be changed via command line or input)
-THEME = dict[str, str]()  # Will be loaded later
+THEME = {}  # Will be loaded later
+
+
+def log_message(msg: str, callback: Optional[Callable[[str, Optional[int]], None]] = None, progress: Optional[int] = None):
+    """Helper to log message and trigger callback if provided."""
+    print(msg)
+    if callback:
+        callback(msg, progress)
 
 
 def create_gradient_fade(ax, color, location="bottom", zorder=10):
@@ -486,6 +494,7 @@ def create_poster(
     text_position="bottom",
     show_buildings=False,
     show_contours=False,
+    callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -504,18 +513,21 @@ def create_poster(
         height: Poster height in inches (default: 16)
         country_label: Optional override for country text on poster
         _name_label: Optional override for city name (unused, reserved for future use)
+        callback: Optional callback(message, progress_percent) for status updates
 
     Raises:
         RuntimeError: If street network data cannot be retrieved
     """
+    global THEME
+    
     # Handle display names for i18n support
     # Priority: display_city/display_country > name_label/country_label > city/country
     display_city = display_city or name_label or city
     display_country = display_country or country_label or country
 
-    print(f"\nGenerating map for {city}, {country}...")
+    log_message(f"--- Generating Map for {city}, {country} ---", callback, 5)
 
-    print("[PROGRESS] 5|Calculating optimal bounding box...")
+    log_message("Calculating optimal bounding box...", callback, 5)
     aspect = width / height
     buffer_margin = 1.15
     lat, lon = point
@@ -534,13 +546,13 @@ def create_poster(
     bbox_tuple = (west, south, east, north)
 
     # 1. Fetch Street Network
-    print("[PROGRESS] 10|Downloading street network...")
+    log_message("Downloading street network...", callback, 10)
     g = fetch_graph(bbox_tuple)
     if g is None:
         raise RuntimeError("Failed to retrieve street network data.")
 
     # 2. Fetch Water Features
-    print("[PROGRESS] 40|Downloading water features...")
+    log_message("Downloading water features...", callback, 40)
     water = fetch_features(
         bbox_tuple,
         tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
@@ -548,7 +560,7 @@ def create_poster(
     )
 
     # 3. Fetch Parks
-    print("[PROGRESS] 60|Downloading parks and green spaces...")
+    log_message("Downloading parks and green spaces...", callback, 60)
     parks = fetch_features(
         bbox_tuple,
         tags={"leisure": "park", "landuse": "grass"},
@@ -558,14 +570,14 @@ def create_poster(
     # 4. Fetch Buildings (Optional)
     buildings = None
     if show_buildings:
-        print("[PROGRESS] 65|Downloading building footprints...")
+        log_message("Downloading building footprints...", callback, 65)
         buildings = fetch_features(
             bbox_tuple,
             tags={"building": True},
             name="buildings",
         )
 
-    print("[PROGRESS] 75|Rendering layers and road hierarchies...")
+    log_message("Rendering layers and road hierarchies...", callback, 75)
     fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME["bg"])
     ax.set_facecolor(THEME["bg"])
     ax.set_position((0.0, 0.0, 1.0, 1.0))
@@ -599,7 +611,7 @@ def create_poster(
             
     # Layer 1.5: Elevation Contours (Optional)
     if show_contours:
-        print("[PROGRESS] 70|Downloading elevation data and rendering contours...")
+        log_message("Downloading elevation data and rendering contours...", callback, 70)
         # Get a grid of elevation points
         try:
             west, south, east, north = bbox_tuple
@@ -609,7 +621,6 @@ def create_poster(
             lon_grid, lat_grid = np.meshgrid(lons, lats)
             
             # Open-Meteo elevation API expects comma-separated lat,lon pairs
-            coords_query = ",".join([f"{lat:.4f},{lon:.4f}" for lat, lon in zip(lat_grid.flatten(), lon_grid.flatten())])
             url = f"https://api.open-meteo.com/v1/elevation?latitude={','.join([f'{lat:.4f}' for lat in lat_grid.flatten()])}&longitude={','.join([f'{lon:.4f}' for lon in lon_grid.flatten()])}"
             
             response = requests.get(url, timeout=10)
@@ -617,8 +628,6 @@ def create_poster(
                 elevations = np.array(response.json()["elevation"]).reshape(lat_grid.shape)
                 
                 # Project the grid for plotting
-                # We need to project each point to match the graph's CRS
-                # (This is an approximation for performance)
                 x_grid = np.zeros_like(lon_grid)
                 y_grid = np.zeros_like(lat_grid)
                 for i in range(lat_grid.shape[0]):
@@ -628,10 +637,10 @@ def create_poster(
                             p = p[0]
                         x_grid[i,j], y_grid[i,j] = p.x, p.y
                 
-                # Render contours with higher visibility (increased alpha and width)
+                # Render contours
                 ax.contour(x_grid, y_grid, elevations, levels=25, colors=THEME['text'], alpha=0.5, linewidths=1.0, zorder=1.1)
         except Exception as e:
-            print(f"⚠ Elevation rendering failed: {e}")
+            log_message(f"⚠ Elevation rendering failed: {e}", callback)
 
     # Layer 2: Buildings (Optional)
     if buildings is not None and not buildings.empty:
@@ -643,16 +652,16 @@ def create_poster(
             except Exception:
                 buildings_polys = buildings_polys.to_crs(g_proj.graph['crs'])
                 
-            # Render Shadow - make it physically significant (approx 1mm on poster)
-            # 1mm ~ 0.04 inches. Offset in meters = 0.04 * (span / width)
+            # Render Shadow
             shadow_offset = 0.03 * (span / width) 
             buildings_polys.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
                 ax=ax, facecolor=THEME.get('text', '#000000'), alpha=0.15, edgecolor='none', zorder=2
             )
             # Render Building
             buildings_polys.plot(ax=ax, facecolor=THEME.get('building', THEME['road_residential']), edgecolor='none', zorder=3)
+
     # Layer 2: Roads with hierarchy coloring
-    print("Applying road hierarchy colors...")
+    log_message("Applying road hierarchy colors...", callback, 80)
     edge_colors = get_edge_colors_by_type(g_proj)
     edge_widths = get_edge_widths_by_type(g_proj)
 
@@ -679,56 +688,30 @@ def create_poster(
         create_gradient_fade(ax, THEME['gradient_color'], location='left', zorder=10)
         create_gradient_fade(ax, THEME['gradient_color'], location='right', zorder=10)
 
-    # Calculate scale factor based on smaller dimension (reference 12 inches)
-    # This ensures text scales properly for both portrait and landscape orientations
+    # Typography
     scale_factor = min(height, width) / 12.0
-
-    # Base font sizes (at 12 inches width)
     base_main = 60
     base_sub = 22
     base_coords = 14
     base_attr = 8
 
-    # 4. Typography - use custom fonts if provided, otherwise use default FONTS
     active_fonts = fonts or FONTS
     if active_fonts:
-        # font_main is calculated dynamically later based on length
-        font_sub = FontProperties(
-            fname=active_fonts["light"], size=base_sub * scale_factor
-        )
-        font_coords = FontProperties(
-            fname=active_fonts["regular"], size=base_coords * scale_factor
-        )
-        font_attr = FontProperties(
-            fname=active_fonts["light"], size=base_attr * scale_factor
-        )
+        font_sub = FontProperties(fname=active_fonts["light"], size=base_sub * scale_factor)
+        font_coords = FontProperties(fname=active_fonts["regular"], size=base_coords * scale_factor)
+        font_attr = FontProperties(fname=active_fonts["light"], size=base_attr * scale_factor)
     else:
-        # Fallback to system fonts
-        font_sub = FontProperties(
-            family="monospace", weight="normal", size=base_sub * scale_factor
-        )
-        font_coords = FontProperties(
-            family="monospace", size=base_coords * scale_factor
-        )
+        font_sub = FontProperties(family="monospace", weight="normal", size=base_sub * scale_factor)
+        font_coords = FontProperties(family="monospace", size=base_coords * scale_factor)
         font_attr = FontProperties(family="monospace", size=base_attr * scale_factor)
 
-    # Format city name based on script type
-    # Latin scripts: apply uppercase and letter spacing for aesthetic
-    # Non-Latin scripts (CJK, Thai, Arabic, etc.): no spacing, preserve case structure
     if is_latin_script(display_city):
-        # Latin script: uppercase with letter spacing (e.g., "P  A  R  I  S")
         spaced_city = "  ".join(list(display_city.upper()))
     else:
-        # Non-Latin script: no spacing, no forced uppercase
-        # For scripts like Arabic, Thai, Japanese, etc.
         spaced_city = display_city
 
-    # Dynamically adjust font size based on city name length to prevent truncation
-    # We use the already scaled "main" font size as the starting point.
     base_adjusted_main = base_main * scale_factor
     city_char_count = len(display_city)
-
-    # Heuristic: If length is > 10, start reducing.
     if city_char_count > 10:
         length_factor = 10 / city_char_count
         adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
@@ -736,123 +719,83 @@ def create_poster(
         adjusted_font_size = base_adjusted_main
 
     if active_fonts:
-        font_main_adjusted = FontProperties(
-            fname=active_fonts["bold"], size=adjusted_font_size
-        )
+        font_main_adjusted = FontProperties(fname=active_fonts["bold"], size=adjusted_font_size)
     else:
-        font_main_adjusted = FontProperties(
-            family="monospace", weight="bold", size=adjusted_font_size
-        )
+        font_main_adjusted = FontProperties(family="monospace", weight="bold", size=adjusted_font_size)
 
-    # --- TEXT BLOCK position ---
-    # bottom: anchor near bottom  top: anchor near top  center: middle
     if text_position == "top":
-        y_city = 0.88
-        y_sep = 0.862
-        y_country = 0.83
-        y_coords = 0.80
+        y_city, y_sep, y_country, y_coords = 0.88, 0.862, 0.83, 0.80
     elif text_position == "center":
-        y_city = 0.56
-        y_sep = 0.542
-        y_country = 0.51
-        y_coords = 0.48
-    else:  # bottom (default)
-        y_city = 0.14
-        y_sep = 0.125
-        y_country = 0.10
-        y_coords = 0.07
+        y_city, y_sep, y_country, y_coords = 0.56, 0.542, 0.51, 0.48
+    else:  # bottom
+        y_city, y_sep, y_country, y_coords = 0.14, 0.125, 0.10, 0.07
 
     if not no_title:
-        ax.text(
-            0.5,
-            y_city,
-            spaced_city,
-            transform=ax.transAxes,
-            color=THEME["text"],
-            ha="center",
-            fontproperties=font_main_adjusted,
-            zorder=11,
-        )
-
-        ax.text(
-            0.5,
-            y_country,
-            display_country.upper(),
-            transform=ax.transAxes,
-            color=THEME["text"],
-            ha="center",
-            fontproperties=font_sub,
-            zorder=11,
-        )
-
-        ax.plot(
-            [0.4, 0.6],
-            [y_sep, y_sep],
-            transform=ax.transAxes,
-            color=THEME["text"],
-            linewidth=1 * scale_factor,
-            zorder=11,
-        )
+        ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=THEME["text"], ha="center", fontproperties=font_main_adjusted, zorder=11)
+        ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=THEME["text"], ha="center", fontproperties=font_sub, zorder=11)
+        ax.plot([0.4, 0.6], [y_sep, y_sep], transform=ax.transAxes, color=THEME["text"], linewidth=1 * scale_factor, zorder=11)
 
     if not no_coords:
         lat, lon = point
-        coords = (
-            f"{lat:.4f}° N / {lon:.4f}° E"
-            if lat >= 0
-            else f"{abs(lat):.4f}° S / {lon:.4f}° E"
-        )
-        if lon < 0:
-            coords = coords.replace("E", "W")
+        coords_text = f"{lat:.4f}° N / {lon:.4f}° E" if lat >= 0 else f"{abs(lat):.4f}° S / {lon:.4f}° E"
+        if lon < 0: coords_text = coords_text.replace("E", "W")
+        ax.text(0.5, y_coords, coords_text, transform=ax.transAxes, color=THEME["text"], alpha=0.7, ha="center", fontproperties=font_coords, zorder=11)
 
-        ax.text(
-            0.5,
-            y_coords,
-            coords,
-            transform=ax.transAxes,
-            color=THEME["text"],
-            alpha=0.7,
-            ha="center",
-            fontproperties=font_coords,
-            zorder=11,
-        )
-
-    # --- ATTRIBUTION (bottom right) ---
-    if FONTS:
-        font_attr = FontProperties(fname=FONTS["light"], size=8)
-    else:
-        font_attr = FontProperties(family="monospace", size=8)
-
-    ax.text(
-        0.98,
-        0.02,
-        "aesthetimap.rastiegaiev.com",
-        transform=ax.transAxes,
-        color=THEME["text"],
-        alpha=0.5,
-        ha="right",
-        va="bottom",
-        fontproperties=font_attr,
-        zorder=11,
-    )
+    ax.text(0.98, 0.02, "aesthetimap.rastiegaiev.com", transform=ax.transAxes, color=THEME["text"], alpha=0.5, ha="right", va="bottom", fontproperties=font_attr, zorder=11)
 
     # 5. Save
-    print(f"Saving to {output_file}...")
-
+    log_message(f"Saving to {output_file}...", callback, 95)
     fmt = output_format.lower()
-    save_kwargs = dict(
-        facecolor=THEME["bg"],
-        bbox_inches="tight",
-        pad_inches=0.05,
-    )
-
-    # DPI matters mainly for raster formats
-    if fmt == "png":
-        save_kwargs["dpi"] = 300
-
+    save_kwargs = dict(facecolor=THEME["bg"], bbox_inches="tight", pad_inches=0.05)
+    if fmt == "png": save_kwargs["dpi"] = 300
     plt.savefig(output_file, format=fmt, **save_kwargs)
-
     plt.close()
-    print(f"✓ Done! Poster saved as {output_file}")
+    log_message(f"✓ Success! Poster saved: {output_file}", callback, 100)
+
+
+def run_generator(
+    city: str,
+    country: str,
+    theme: str = "terracotta",
+    span: int = 20000,
+    width: float = 12.0,
+    height: float = 16.0,
+    output_format: str = "png",
+    latitude: Optional[str] = None,
+    longitude: Optional[str] = None,
+    no_title: bool = False,
+    no_coords: bool = False,
+    gradient_tb: bool = False,
+    gradient_lr: bool = False,
+    text_position: str = "bottom",
+    country_label: Optional[str] = None,
+    display_city: Optional[str] = None,
+    display_country: Optional[str] = None,
+    font_family: Optional[str] = None,
+    show_buildings: bool = False,
+    show_contours: bool = False,
+    callback: Optional[Callable[[str, Optional[int]], None]] = None,
+):
+    """Entry point for library calls."""
+    global THEME
+    custom_fonts = load_fonts(font_family) if font_family else None
+    if latitude and longitude:
+        coords = (parse(latitude), parse(longitude))
+    else:
+        coords = get_coordinates(city, country)
+
+    THEME = load_theme(theme)
+    output_file = generate_output_filename(city, theme, output_format)
+    create_poster(
+        city, country, coords, span, output_file, output_format,
+        width=width, height=height, country_label=country_label,
+        display_city=display_city, display_country=display_country,
+        fonts=custom_fonts, no_title=no_title, no_coords=no_coords,
+        gradient_tb=gradient_tb, gradient_lr=gradient_lr,
+        text_position=text_position, show_buildings=show_buildings,
+        show_contours=show_contours, callback=callback
+    )
+    return output_file
 
 
 def print_examples():
