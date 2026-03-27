@@ -636,8 +636,8 @@ def create_poster(
         # Get a grid of elevation points
         try:
             west, south, east, north = bbox_tuple
-            # Use a denser grid for smoother contours
-            grid_size = 40
+            # 30x30 grid is enough for aesthetics and much more stable for API limits
+            grid_size = 30
             lats = np.linspace(south, north, grid_size)
             lons = np.linspace(west, east, grid_size)
             lon_grid, lat_grid = np.meshgrid(lons, lats)
@@ -648,6 +648,8 @@ def create_poster(
             
             # Open-Meteo allows max 100 coordinates per request
             batch_size = 100
+            last_valid_elev = 0
+            
             for i in range(0, len(flat_lats), batch_size):
                 batch_lats = flat_lats[i:i + batch_size]
                 batch_lons = flat_lons[i:i + batch_size]
@@ -656,16 +658,24 @@ def create_poster(
                 lons_str = ",".join([f"{lon:.4f}" for lon in batch_lons])
                 url = f"https://api.open-meteo.com/v1/elevation?latitude={lats_str}&longitude={lons_str}"
                 
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    all_elevations.extend(response.json()["elevation"])
-                else:
-                    log_message(f"⚠ Elevation API batch failed: {response.status_code}", callback)
-                    # Fill with 0 or previous to avoid crash, though better to handle error
-                    all_elevations.extend([0] * len(batch_lats))
+                try:
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        batch_elevs = response.json().get("elevation", [])
+                        if batch_elevs:
+                            all_elevations.extend(batch_elevs)
+                            last_valid_elev = batch_elevs[-1]
+                        else:
+                            raise ValueError("Empty elevation response")
+                    else:
+                        raise ValueError(f"Status code {response.status_code}")
+                except Exception as e:
+                    log_message(f"⚠ Elevation API batch failed: {e}. Using fallback values.", callback)
+                    # Fill with last valid elevation to avoid "cliff" effect
+                    all_elevations.extend([last_valid_elev] * len(batch_lats))
                 
-                # Small delay to avoid rate limiting
-                time.sleep(0.1)
+                # Longer delay to avoid rate limiting
+                time.sleep(0.2)
 
             if len(all_elevations) == len(flat_lats):
                 elevations = np.array(all_elevations).reshape(lat_grid.shape)
@@ -680,11 +690,11 @@ def create_poster(
                             p = p[0]
                         x_grid[i,j], y_grid[i,j] = p.x, p.y
                 
-                # Render contours with high zorder and better visibility
-                # Use dynamic levels based on elevation range
+                # Render contours with high zorder and subtle visibility
                 min_elev, max_elev = np.min(elevations), np.max(elevations)
-                if max_elev - min_elev > 5: # Only draw if there's significant variation
-                    ax.contour(x_grid, y_grid, elevations, levels=20, colors=THEME['text'], alpha=0.5, linewidths=0.6, zorder=7)
+                if max_elev - min_elev > 5:
+                    # Use a slightly thinner linewidth and more transparency for better integration
+                    ax.contour(x_grid, y_grid, elevations, levels=20, colors=THEME['text'], alpha=0.4, linewidths=0.5, zorder=7)
                 else:
                     log_message("ℹ Elevation range too small for contours", callback)
             else:
