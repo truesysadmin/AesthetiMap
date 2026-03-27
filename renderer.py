@@ -678,6 +678,40 @@ def create_poster(
             log_message(f"⚠ Elevation rendering failed: {e}", callback)
 
     # Layer 2: Roads with hierarchy coloring
+    log_message("Applying road hierarchy colors...", callback, 80)
+    edge_colors = get_edge_colors_by_type(g_proj)
+    edge_widths = get_edge_widths_by_type(g_proj)
+
+    # Determine cropping limits to maintain the poster aspect ratio
+    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, span)
+
+    # Draw Buildings (Layer 2)
+    if buildings is not None and not buildings.empty:
+        try:
+            buildings_proj = ox.projection.project_gdf(buildings)
+            # Render Shadow
+            shadow_offset = 0.03 * (span / width)
+            buildings_proj.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
+                ax=ax, facecolor=THEME.get('text', '#000000'), alpha=0.15, edgecolor='none', zorder=2
+            )
+            # Render Building
+            buildings_proj.plot(ax=ax, facecolor=THEME.get('building', THEME['road_residential']), edgecolor='none', zorder=3)
+        except Exception as e:
+            log_message(f"⚠ Building rendering failed: {e}", callback)
+
+    # Plot the projected graph and then apply the cropped limits
+    ox.plot_graph(
+        g_proj, ax=ax, bgcolor=THEME['bg'],
+        node_size=0,
+        edge_color=edge_colors,
+        edge_linewidth=edge_widths,
+        show=False,
+        close=False,
+    )
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlim(crop_xlim)
+    ax.set_ylim(crop_ylim)
+    ax.axis("off")
 
     # Layer 3: Gradients
     if gradient_tb:
