@@ -32,13 +32,14 @@ Access the UI at: **http://localhost:3000**
 You can also run the renderer script directly if you have Python installed:
 
 ```bash
-python renderer.py --city "Kyiv" --country "Ukraine" --theme gold_on_porcelain
+python renderer.py --city "Kyiv" --country "Ukraine" --theme gold_on_porcelain --span 20000
 ```
 
 ### Options:
 - `--city`, `-c`: City name (required)
 - `--country`, `-C`: Country name (required)
 - `--theme`, `-t`: Theme name (default: terracotta)
+- `--span`, `-d`: Map coverage (total span) in meters (default: 20000)
 - `--width`, `-W`: Width in inches (max 40)
 - `--height`, `-H`: Height in inches (max 40)
 - `--format`, `-f`: Output format (png, svg, pdf)

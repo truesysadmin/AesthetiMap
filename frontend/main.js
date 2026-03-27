@@ -1,8 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('generate-form');
   const themeSelect = document.getElementById('theme');
-  const distanceSlider = document.getElementById('distance');
-  const distanceVal = document.getElementById('distance-val');
+  const spanSlider = document.getElementById('span');
+  const spanVal = document.getElementById('span-val');
   const submitBtn = document.getElementById('submit-btn');
   const btnText = submitBtn.querySelector('.btn-text');
   const loader = document.getElementById('loader');
@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Pre-fill fields from URL params
   const params = new URLSearchParams(window.location.search);
-  const textFields = ['city', 'country', 'latitude', 'longitude', 'distance', 'width', 'height', 'format'];
+  const textFields = ['city', 'country', 'latitude', 'longitude', 'span', 'width', 'height', 'format'];
   textFields.forEach(f => {
     if (params.has(f)) {
       const el = document.getElementById(f);
@@ -38,8 +38,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (params.has('text_position')) {
     document.getElementById('text-position').value = params.get('text_position');
   }
-  if (params.has('distance')) {
-    distanceVal.textContent = params.get('distance');
+  if (params.has('span')) {
+    spanVal.textContent = params.get('span');
   }
 
   // Pre-load image if shared link contains it
@@ -55,8 +55,8 @@ document.addEventListener('DOMContentLoaded', () => {
     actionBar.classList.remove('hidden');
   }
 
-  distanceSlider.addEventListener('input', (e) => {
-    distanceVal.textContent = e.target.value;
+  spanSlider.addEventListener('input', (e) => {
+    spanVal.textContent = e.target.value;
   });
 
   fetch('/api/themes')
@@ -104,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
       city: document.getElementById('city').value,
       country: document.getElementById('country').value,
       theme: document.getElementById('theme').value,
-      distance: parseInt(document.getElementById('distance').value, 10),
+      span: parseInt(document.getElementById('span').value, 10),
       width: parseFloat(document.getElementById('width').value),
       height: parseFloat(document.getElementById('height').value),
       format: document.getElementById('format').value,

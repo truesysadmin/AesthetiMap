@@ -376,12 +376,13 @@ def get_coordinates(city, country):
     raise ValueError(f"Could not find coordinates for {city}, {country}")
 
 
-def get_crop_limits(g_proj, center_lat_lon, fig, dist):
+def get_crop_limits(g_proj, center_lat_lon, fig, span):
     """
     Crop inward to preserve aspect ratio while guaranteeing
-    full coverage of the requested radius.
+    full coverage of the requested span (total width/height).
     """
     lat, lon = center_lat_lon
+    dist = span / 2
 
     # Project center point into graph CRS
     center = (
@@ -467,7 +468,7 @@ def create_poster(
     city,
     country,
     point,
-    dist,
+    span,
     output_file,
     output_format,
     width=12,
@@ -493,7 +494,7 @@ def create_poster(
         city: City name for display on poster
         country: Country name for display on poster
         point: (latitude, longitude) tuple for map center
-        dist: Map radius in meters
+        span: Map coverage (span) in meters
         output_file: Path where poster will be saved
         output_format: File format ('png', 'svg', or 'pdf')
         width: Poster width in inches (default: 12)
@@ -515,6 +516,7 @@ def create_poster(
     aspect = width / height
     buffer_margin = 1.15
     lat, lon = point
+    dist = span / 2
     if aspect < 1.0: # Portrait
         dist_ns = dist * buffer_margin
         dist_ew = dist * aspect * buffer_margin
@@ -587,7 +589,7 @@ def create_poster(
     edge_widths = get_edge_widths_by_type(g_proj)
 
     # Determine cropping limits to maintain the poster aspect ratio
-    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, dist)
+    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, span)
     # Plot the projected graph and then apply the cropped limits
     ox.plot_graph(
         g_proj, ax=ax, bgcolor=THEME['bg'],
@@ -792,12 +794,12 @@ City Map Poster Generator
 =========================
 
 Usage:
-  python create_map_poster.py --city <city> --country <country> [options]
+  python renderer.py --city <city> --country <country> [options]
 
 Examples:
   # Iconic grid patterns
-  python create_map_poster.py -c "New York" -C "USA" -t noir -d 12000           # Manhattan grid
-  python create_map_poster.py -c "Barcelona" -C "Spain" -t warm_beige -d 8000   # Eixample district grid
+  python renderer.py -c "New York" -C "USA" -t noir --span 24000           # Manhattan grid
+  python renderer.py -c "Barcelona" -C "Spain" -t warm_beige --span 16000 # Eixample district grid
 
   # Waterfront & canals
   python create_map_poster.py -c "Venice" -C "Italy" -t blueprint -d 4000       # Canal network
@@ -921,11 +923,11 @@ Examples:
         help="Generate posters for all themes",
     )
     parser.add_argument(
-        "--distance",
+        "--span",
         "-d",
         type=int,
-        default=18000,
-        help="Map radius in meters (default: 18000)",
+        default=20000,
+        help="Map coverage (span) in meters (default: 20000)",
     )
     parser.add_argument(
         "--width",
@@ -1069,7 +1071,7 @@ Examples:
                 args.city,
                 args.country,
                 coords,
-                args.distance,
+                args.span,
                 output_file,
                 args.format,
                 args.width,

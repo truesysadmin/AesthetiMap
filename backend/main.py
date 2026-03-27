@@ -81,7 +81,7 @@ class GenerateRequest(BaseModel):
     latitude: Optional[str] = None
     longitude: Optional[str] = None
     theme: str = "terracotta"
-    distance: int = 18000
+    span: int = 20000
     width: float = 12.0
     height: float = 16.0
     format: str = "png"
@@ -112,7 +112,7 @@ def generate_map_stream(req: GenerateRequest):
             
         cmd.extend([
             "-t", req.theme,
-            "-d", str(req.distance),
+            "-d", str(req.span),
             "-W", str(req.width),
             "-H", str(req.height),
             "-f", req.format
