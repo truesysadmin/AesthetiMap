@@ -386,13 +386,13 @@ def get_crop_limits(g_proj, center_lat_lon, fig, span):
     dist = span / 2
 
     # Project center point into graph CRS
-    center = (
-        ox.projection.project_geometry(
-            Point(lon, lat),
-            crs="EPSG:4326",
-            to_crs=g_proj.graph["crs"]
-        )
+    center = ox.projection.project_geometry(
+        Point(lon, lat),
+        crs="EPSG:4326",
+        to_crs=g_proj.graph["crs"]
     )
+    if isinstance(center, tuple):
+        center = center[0]
     center_x, center_y = center.x, center.y
 
     fig_width, fig_height = fig.get_size_inches()
@@ -624,6 +624,8 @@ def create_poster(
                 for i in range(lat_grid.shape[0]):
                     for j in range(lat_grid.shape[1]):
                         p = ox.projection.project_geometry(Point(lon_grid[i,j], lat_grid[i,j]), crs="EPSG:4326", to_crs=g_proj.graph["crs"])
+                        if isinstance(p, tuple):
+                            p = p[0]
                         x_grid[i,j], y_grid[i,j] = p.x, p.y
                 
                 # Render contours with higher visibility
