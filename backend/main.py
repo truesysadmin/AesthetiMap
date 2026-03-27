@@ -93,6 +93,8 @@ class GenerateRequest(BaseModel):
     country_label: Optional[str] = None
     display_city: Optional[str] = None
     display_country: Optional[str] = None
+    show_buildings: bool = False
+    show_contours: bool = False
 
 @app.get("/api/themes")
 def get_themes():
@@ -134,6 +136,10 @@ def generate_map_stream(req: GenerateRequest):
             cmd.extend(["-dc", req.display_city])
         if req.display_country:
             cmd.extend(["-dC", req.display_country])
+        if req.show_buildings:
+            cmd.append("--show-buildings")
+        if req.show_contours:
+            cmd.append("--show-contours")
             
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         

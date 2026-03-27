@@ -13,6 +13,7 @@ import json
 import os
 import pickle
 import glob
+import requests
 import sys
 import time
 from datetime import datetime
@@ -483,6 +484,8 @@ def create_poster(
     gradient_tb=False,
     gradient_lr=False,
     text_position="bottom",
+    show_buildings=False,
+    show_contours=False,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -551,6 +554,16 @@ def create_poster(
         tags={"leisure": "park", "landuse": "grass"},
         name="parks",
     )
+    
+    # 4. Fetch Buildings (Optional)
+    buildings = None
+    if show_buildings:
+        print("[PROGRESS] 65|Downloading building footprints...")
+        buildings = fetch_features(
+            bbox_tuple,
+            tags={"building": True},
+            name="buildings",
+        )
 
     print("[PROGRESS] 75|Rendering layers and road hierarchies...")
     fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME["bg"])
@@ -583,6 +596,56 @@ def create_poster(
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+            
+    # Layer 1.5: Elevation Contours (Optional)
+    if show_contours:
+        print("[PROGRESS] 70|Downloading elevation data and rendering contours...")
+        # Get a grid of elevation points
+        try:
+            west, south, east, north = bbox_tuple
+            lats = np.linspace(south, north, 15)
+            lons = np.linspace(west, east, 15)
+            lon_grid, lat_grid = np.meshgrid(lons, lats)
+            
+            # Open-Meteo elevation API expects comma-separated lat,lon pairs
+            coords_query = ",".join([f"{lat:.4f},{lon:.4f}" for lat, lon in zip(lat_grid.flatten(), lon_grid.flatten())])
+            url = f"https://api.open-meteo.com/v1/elevation?latitude={','.join([f'{lat:.4f}' for lat in lat_grid.flatten()])}&longitude={','.join([f'{lon:.4f}' for lon in lon_grid.flatten()])}"
+            
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                elevations = np.array(response.json()["elevation"]).reshape(lat_grid.shape)
+                
+                # Project the grid for plotting
+                # We need to project each point to match the graph's CRS
+                # (This is an approximation for performance)
+                x_grid = np.zeros_like(lon_grid)
+                y_grid = np.zeros_like(lat_grid)
+                for i in range(lat_grid.shape[0]):
+                    for j in range(lat_grid.shape[1]):
+                        p = ox.projection.project_geometry(Point(lon_grid[i,j], lat_grid[i,j]), crs="EPSG:4326", to_crs=g_proj.graph["crs"])[0]
+                        x_grid[i,j], y_grid[i,j] = p.x, p.y
+                
+                ax.contour(x_grid, y_grid, elevations, levels=15, colors=THEME['text'], alpha=0.15, linewidths=0.5, zorder=0.9)
+        except Exception as e:
+            print(f"⚠ Elevation rendering failed: {e}")
+
+    # Layer 2: Buildings (Optional)
+    if buildings is not None and not buildings.empty:
+        # Filter to only polygon/multipolygon geometries
+        buildings_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not buildings_polys.empty:
+            try:
+                buildings_polys = ox.projection.project_gdf(buildings_polys)
+            except Exception:
+                buildings_polys = buildings_polys.to_crs(g_proj.graph['crs'])
+                
+            # Render Shadow
+            shadow_offset = (span / 1000) * 0.8 # Scale shadow by zoom level
+            buildings_polys.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
+                ax=ax, facecolor=THEME['text'], alpha=0.1, edgecolor='none', zorder=1.5
+            )
+            # Render Building
+            buildings_polys.plot(ax=ax, facecolor=THEME.get('building', THEME['road_residential']), edgecolor='none', zorder=2)
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(g_proj)
@@ -998,6 +1061,16 @@ Examples:
         choices=["bottom", "top", "center"],
         help="Position of the city/country text block (default: bottom)",
     )
+    parser.add_argument(
+        "--show-buildings",
+        action="store_true",
+        help="Show building footprints with shadows",
+    )
+    parser.add_argument(
+        "--show-contours",
+        action="store_true",
+        help="Show topography contours",
+    )
 
     args = parser.parse_args()
 
@@ -1085,6 +1158,8 @@ Examples:
                 gradient_tb=args.gradient_tb,
                 gradient_lr=args.gradient_lr,
                 text_position=args.text_position,
+                show_buildings=args.show_buildings,
+                show_contours=args.show_contours,
             )
 
         print("\n" + "=" * 50)

@@ -63,17 +63,17 @@
 
             <div class="form-group">
               <label for="span">Map Coverage (m): <span id="span-val">20000</span> m</label>
-              <input type="range" id="span" min="4000" max="80000" step="1000" value="20000">
+              <input type="range" id="span" min="500" max="80000" step="500" value="20000">
             </div>
 
             <div class="form-group row">
               <div class="input-col">
                 <label for="width">Width (in)</label>
-                <input type="number" id="width" value="12" step="0.5" max="20">
+                <input type="number" id="width" value="12" step="0.5" max="40">
               </div>
               <div class="input-col">
                 <label for="height">Height (in)</label>
-                <input type="number" id="height" value="16" step="0.5" max="20">
+                <input type="number" id="height" value="16" step="0.5" max="40">
               </div>
             </div>
 
@@ -96,6 +96,14 @@
               <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <input type="checkbox" id="no-coords" style="width: auto; margin: 0;">
                 <label for="no-coords" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: normal; font-size: 0.95rem;">Hide Coordinates</label>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <input type="checkbox" id="show-buildings" style="width: auto; margin: 0;">
+                <label for="show-buildings" style="margin: 0; color: var(--text-accent); cursor: pointer; text-transform: none; font-weight: 600; font-size: 0.95rem;">Show Building Shadows ✨</label>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <input type="checkbox" id="show-contours" style="width: auto; margin: 0;">
+                <label for="show-contours" style="margin: 0; color: var(--text-accent); cursor: pointer; text-transform: none; font-weight: 600; font-size: 0.95rem;">Show Topography (⛰️)</label>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <input type="checkbox" id="gradient-tb" style="width: auto; margin: 0;">

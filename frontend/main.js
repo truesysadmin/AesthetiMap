@@ -41,6 +41,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (params.has('span')) {
     spanVal.textContent = params.get('span');
   }
+  if (params.get('show_buildings') === 'true') {
+    document.getElementById('show-buildings').checked = true;
+  }
+  if (params.get('show_contours') === 'true') {
+    document.getElementById('show-contours').checked = true;
+  }
 
   // Pre-load image if shared link contains it
   if (params.has('img')) {
@@ -112,7 +118,9 @@ document.addEventListener('DOMContentLoaded', () => {
       no_coords: document.getElementById('no-coords').checked,
       gradient_tb: document.getElementById('gradient-tb').checked,
       gradient_lr: document.getElementById('gradient-lr').checked,
-      text_position: document.getElementById('text-position').value
+      text_position: document.getElementById('text-position').value,
+      show_buildings: document.getElementById('show-buildings').checked,
+      show_contours: document.getElementById('show-contours').checked
     };
 
     const lat = document.getElementById('latitude').value;
