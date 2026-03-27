@@ -1,0 +1,16 @@
+{
+  "name": "Dubai Chocolate",
+  "description": "Luxurious dark chocolate with golden veins and a hint of pistachio green.",
+  "bg": "#2A1810",
+  "text": "#E8C37B",
+  "gradient_color": "#2A1810",
+  "water": "#1F120A",
+  "parks": "#3B4D28",
+  "building": "#4A2C1E",
+  "road_motorway": "#D4AF37",
+  "road_primary": "#C5A028",
+  "road_secondary": "#B6D7A8",
+  "road_tertiary": "#8A6E45",
+  "road_residential": "#5D4037",
+  "road_default": "#4E342E"
+}

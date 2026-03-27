@@ -1,0 +1,16 @@
+{
+  "name": "Ruby",
+  "description": "Deep crimson and burgundy palette with brilliant pink gemstone accents.",
+  "bg": "#450A0A",
+  "text": "#FCA5A5",
+  "gradient_color": "#450A0A",
+  "water": "#2D0606",
+  "parks": "#7F1D1D",
+  "building": "#991B1B",
+  "road_motorway": "#F87171",
+  "road_primary": "#EF4444",
+  "road_secondary": "#DC2626",
+  "road_tertiary": "#B91C1C",
+  "road_residential": "#7F1D1D",
+  "road_default": "#991B1B"
+}

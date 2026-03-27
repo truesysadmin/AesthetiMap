@@ -1,0 +1,16 @@
+{
+  "name": "Nordic Midnight",
+  "description": "Arctic slate blue with bright cyan roads — cold, crisp, and digital.",
+  "bg": "#0F172A",
+  "text": "#22D3EE",
+  "gradient_color": "#0F172A",
+  "water": "#020617",
+  "parks": "#1E293B",
+  "building": "#1E293B",
+  "road_motorway": "#06B6D4",
+  "road_primary": "#0891B2",
+  "road_secondary": "#0E7490",
+  "road_tertiary": "#155E75",
+  "road_residential": "#1E40AF",
+  "road_default": "#1E3A8A"
+}
