@@ -609,34 +609,12 @@ def create_poster(
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
             
-    # Layer 2: Roads with hierarchy coloring
-    log_message("Applying road hierarchy colors...", callback, 80)
-    edge_colors = get_edge_colors_by_type(g_proj)
-    edge_widths = get_edge_widths_by_type(g_proj)
-
-    # Determine cropping limits to maintain the poster aspect ratio
-    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, span)
-    # Plot the projected graph and then apply the cropped limits
-    ox.plot_graph(
-        g_proj, ax=ax, bgcolor=THEME['bg'],
-        node_size=0,
-        edge_color=edge_colors,
-        edge_linewidth=edge_widths,
-        show=False,
-        close=False,
-    )
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xlim(crop_xlim)
-    ax.set_ylim(crop_ylim)
-
-    # Layer 2.5: Elevation Contours (Optional)
-    # Render after roads to ensure visibility
+    # Layer 1.5: Elevation Contours (Optional)
+    # Render here to be under roads and buildings
     if show_contours:
-        log_message("Downloading elevation data and rendering contours...", callback, 82)
-        # Get a grid of elevation points
+        log_message("Downloading elevation data and rendering contours...", callback, 70)
         try:
             west, south, east, north = bbox_tuple
-            # 30x30 grid is enough for aesthetics and much more stable for API limits
             grid_size = 30
             lats = np.linspace(south, north, grid_size)
             lons = np.linspace(west, east, grid_size)
@@ -646,8 +624,8 @@ def create_poster(
             flat_lons = lon_grid.flatten()
             all_elevations = []
             
-            # Open-Meteo allows max 100 coordinates per request
-            batch_size = 100
+            # Use smaller batches and retries for maximum reliability
+            batch_size = 50
             last_valid_elev = 0
             
             for i in range(0, len(flat_lats), batch_size):
@@ -658,49 +636,48 @@ def create_poster(
                 lons_str = ",".join([f"{lon:.4f}" for lon in batch_lons])
                 url = f"https://api.open-meteo.com/v1/elevation?latitude={lats_str}&longitude={lons_str}"
                 
-                try:
-                    response = requests.get(url, timeout=10)
-                    if response.status_code == 200:
-                        batch_elevs = response.json().get("elevation", [])
-                        if batch_elevs:
-                            all_elevations.extend(batch_elevs)
-                            last_valid_elev = batch_elevs[-1]
-                        else:
-                            raise ValueError("Empty elevation response")
-                    else:
-                        raise ValueError(f"Status code {response.status_code}")
-                except Exception as e:
-                    log_message(f"⚠ Elevation API batch failed: {e}. Using fallback values.", callback)
-                    # Fill with last valid elevation to avoid "cliff" effect
+                # Retry logic
+                success = False
+                for attempt in range(2):
+                    try:
+                        response = requests.get(url, timeout=10)
+                        if response.status_code == 200:
+                            batch_elevs = response.json().get("elevation", [])
+                            if batch_elevs:
+                                all_elevations.extend(batch_elevs)
+                                last_valid_elev = batch_elevs[-1]
+                                success = True
+                                break
+                    except Exception:
+                        time.sleep(0.5)
+                
+                if not success:
+                    log_message(f"⚠ Elevation batch {i//batch_size} failed. Using fallback.", callback)
                     all_elevations.extend([last_valid_elev] * len(batch_lats))
                 
-                # Longer delay to avoid rate limiting
-                time.sleep(0.2)
+                time.sleep(0.3) # Respect API limits
 
             if len(all_elevations) == len(flat_lats):
                 elevations = np.array(all_elevations).reshape(lat_grid.shape)
                 
-                # Project the grid for plotting
                 x_grid = np.zeros_like(lon_grid)
                 y_grid = np.zeros_like(lat_grid)
                 for i in range(lat_grid.shape[0]):
                     for j in range(lat_grid.shape[1]):
                         p = ox.projection.project_geometry(Point(lon_grid[i,j], lat_grid[i,j]), crs="EPSG:4326", to_crs=g_proj.graph["crs"])
-                        if isinstance(p, tuple):
-                            p = p[0]
+                        if isinstance(p, tuple): p = p[0]
                         x_grid[i,j], y_grid[i,j] = p.x, p.y
                 
-                # Render contours with high zorder and subtle visibility
                 min_elev, max_elev = np.min(elevations), np.max(elevations)
                 if max_elev - min_elev > 5:
-                    # Use a slightly thinner linewidth and more transparency for better integration
-                    ax.contour(x_grid, y_grid, elevations, levels=20, colors=THEME['text'], alpha=0.4, linewidths=0.5, zorder=7)
+                    # zorder=0.7 puts it behind roads (6.0), buildings (3.0), and parks (0.8)
+                    ax.contour(x_grid, y_grid, elevations, levels=25, colors=THEME['text'], alpha=0.2, linewidths=0.4, zorder=0.7)
                 else:
                     log_message("ℹ Elevation range too small for contours", callback)
-            else:
-                log_message("⚠ Failed to fetch all elevation points", callback)
         except Exception as e:
             log_message(f"⚠ Elevation rendering failed: {e}", callback)
+
+    # Layer 2: Roads with hierarchy coloring
 
     # Layer 3: Gradients
     if gradient_tb:
