@@ -32,17 +32,17 @@ async def worker():
         task_id = task_data["task_id"]
         req = task_data["request"]
         event_queue = task_events.get(task_id)
+        loop = asyncio.get_event_loop()
 
         def callback(message: str, progress: Optional[int] = None):
             if event_queue:
                 data = {"type": "log", "message": message}
                 if progress is not None:
                     data = {"type": "progress", "percent": progress, "message": message}
-                asyncio.run_coroutine_threadsafe(event_queue.put(data), asyncio.get_event_loop())
+                loop.call_soon_threadsafe(lambda: event_queue.put_nowait(data))
 
         try:
             # Run the heavy rendering in a thread pool to avoid blocking the event loop
-            loop = asyncio.get_running_loop()
             result_file = await loop.run_in_executor(
                 None,
                 lambda: renderer.run_generator(
