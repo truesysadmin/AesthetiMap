@@ -672,7 +672,7 @@ def create_poster(
             if max_elev - min_elev > 5:
                 ax.contour(
                     x_grid, y_grid, elevations, levels=25,
-                    colors=theme['text'], alpha=0.22, linewidths=0.45, zorder=0.7
+                    colors=theme['text'], alpha=0.18, linewidths=0.25, zorder=0.7
                 )
             else:
                 log_message("ℹ Elevation range too small for contours", callback)
@@ -695,13 +695,13 @@ def create_poster(
         log_message("Rendering building footprints...", callback, 88)
         try:
             buildings_proj = ox.projection.project_gdf(buildings)
-            # Render Shadow
-            shadow_offset = 0.03 * (span / width)
+            # Render shadow — subtle, very thin
+            shadow_offset = 0.02 * (span / width)
             buildings_proj.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
-                ax=ax, facecolor=theme.get('text', '#000000'), alpha=0.15, edgecolor='none', zorder=2
+                ax=ax, facecolor=theme.get('text', '#000000'), alpha=0.08, edgecolor='none', linewidth=0, zorder=2
             )
-            # Render Building
-            buildings_proj.plot(ax=ax, facecolor=theme.get('building', theme['road_residential']), edgecolor='none', zorder=3)
+            # Render building fill — no border
+            buildings_proj.plot(ax=ax, facecolor=theme.get('building', theme['road_residential']), edgecolor='none', linewidth=0, zorder=3)
         except Exception as e:
             log_message(f"⚠ Building rendering failed: {e}", callback)
 
