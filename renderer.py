@@ -628,8 +628,8 @@ def create_poster(
                             p = p[0]
                         x_grid[i,j], y_grid[i,j] = p.x, p.y
                 
-                # Render contours with higher visibility
-                ax.contour(x_grid, y_grid, elevations, levels=20, colors=THEME['text'], alpha=0.3, linewidths=0.7, zorder=1.1)
+                # Render contours with higher visibility (increased alpha and width)
+                ax.contour(x_grid, y_grid, elevations, levels=25, colors=THEME['text'], alpha=0.5, linewidths=1.0, zorder=1.1)
         except Exception as e:
             print(f"⚠ Elevation rendering failed: {e}")
 
