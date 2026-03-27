@@ -1,15 +1,16 @@
 {
   "name": "Glory to Ukraine 💛💙",
-  "description": "Proud national colors: deep blue backgrounds with glowing bright yellow street grids",
+  "description": "True national colors: vibrant azure blue with brilliant golden yellow highlights.",
   "bg": "#0057B7",
-  "text": "#FFFFFF",
+  "text": "#FFD700",
   "gradient_color": "#0057B7",
-  "water": "#004796",
-  "parks": "#0066D6",
+  "water": "#00418A",
+  "parks": "#0064D2",
+  "building": "#FFD700",
   "road_motorway": "#FFD700",
-  "road_primary": "#FFDF33",
-  "road_secondary": "#FFE666",
-  "road_tertiary": "#FFED99",
-  "road_residential": "#FFF4CC",
-  "road_default": "#FFE033"
+  "road_primary": "#FFD700",
+  "road_secondary": "#FFDF33",
+  "road_tertiary": "#FFE666",
+  "road_residential": "#FFED99",
+  "road_default": "#FFDF33"
 }
