@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('AesthetiMap UI v1.1 Loaded (Buildings & Topography)');
   const form = document.getElementById('generate-form');
   const themeSelect = document.getElementById('theme');
   const spanSlider = document.getElementById('span');

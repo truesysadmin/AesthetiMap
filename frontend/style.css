@@ -9,6 +9,8 @@
   --input-bg: rgba(0, 0, 0, 0.2);
   --input-border: rgba(255, 255, 255, 0.1);
   --input-focus: #3b82f6;
+  --text-accent: #a5b4fc;
+  --text-accent-secondary: #818cf8;
   --glass-blur: 16px;
 }
 
