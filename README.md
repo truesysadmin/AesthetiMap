@@ -2,7 +2,7 @@
 
 Generate stunning, customizable map art posters for any city in the world using OpenStreetMap data.
 
-![AesthetiMap Hero](posters/example.png) *(Placeholder for hero image)*
+![AesthetiMap Hero](posters/example.png)
 
 ## ✨ Features
 
