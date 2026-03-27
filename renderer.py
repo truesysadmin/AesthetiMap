@@ -637,16 +637,38 @@ def create_poster(
         try:
             west, south, east, north = bbox_tuple
             # Use a denser grid for smoother contours
-            lats = np.linspace(south, north, 40)
-            lons = np.linspace(west, east, 40)
+            grid_size = 40
+            lats = np.linspace(south, north, grid_size)
+            lons = np.linspace(west, east, grid_size)
             lon_grid, lat_grid = np.meshgrid(lons, lats)
             
-            # Open-Meteo elevation API expects comma-separated lat,lon pairs
-            url = f"https://api.open-meteo.com/v1/elevation?latitude={','.join([f'{lat:.4f}' for lat in lat_grid.flatten()])}&longitude={','.join([f'{lon:.4f}' for lon in lon_grid.flatten()])}"
+            flat_lats = lat_grid.flatten()
+            flat_lons = lon_grid.flatten()
+            all_elevations = []
             
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                elevations = np.array(response.json()["elevation"]).reshape(lat_grid.shape)
+            # Open-Meteo allows max 100 coordinates per request
+            batch_size = 100
+            for i in range(0, len(flat_lats), batch_size):
+                batch_lats = flat_lats[i:i + batch_size]
+                batch_lons = flat_lons[i:i + batch_size]
+                
+                lats_str = ",".join([f"{lat:.4f}" for lat in batch_lats])
+                lons_str = ",".join([f"{lon:.4f}" for lon in batch_lons])
+                url = f"https://api.open-meteo.com/v1/elevation?latitude={lats_str}&longitude={lons_str}"
+                
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    all_elevations.extend(response.json()["elevation"])
+                else:
+                    log_message(f"⚠ Elevation API batch failed: {response.status_code}", callback)
+                    # Fill with 0 or previous to avoid crash, though better to handle error
+                    all_elevations.extend([0] * len(batch_lats))
+                
+                # Small delay to avoid rate limiting
+                time.sleep(0.1)
+
+            if len(all_elevations) == len(flat_lats):
+                elevations = np.array(all_elevations).reshape(lat_grid.shape)
                 
                 # Project the grid for plotting
                 x_grid = np.zeros_like(lon_grid)
@@ -659,7 +681,14 @@ def create_poster(
                         x_grid[i,j], y_grid[i,j] = p.x, p.y
                 
                 # Render contours with high zorder and better visibility
-                ax.contour(x_grid, y_grid, elevations, levels=20, colors=THEME['text'], alpha=0.6, linewidths=0.8, zorder=7)
+                # Use dynamic levels based on elevation range
+                min_elev, max_elev = np.min(elevations), np.max(elevations)
+                if max_elev - min_elev > 5: # Only draw if there's significant variation
+                    ax.contour(x_grid, y_grid, elevations, levels=20, colors=THEME['text'], alpha=0.5, linewidths=0.6, zorder=7)
+                else:
+                    log_message("ℹ Elevation range too small for contours", callback)
+            else:
+                log_message("⚠ Failed to fetch all elevation points", callback)
         except Exception as e:
             log_message(f"⚠ Elevation rendering failed: {e}", callback)
 
