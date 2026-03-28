@@ -10,15 +10,14 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict
 import sys
+from contextlib import asynccontextmanager
 
 # Add root directory to sys.path to import renderer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import renderer
 
-app = FastAPI(title="AesthetiMap API")
-
-MAX_AGE_DAYS = float(os.getenv("MAX_CLEANUP_DAYS", "7"))
-MAX_SIZE_MB = float(os.getenv("MAX_CLEANUP_MB", "1024")) # default 1 GB
+MAX_AGE_DAYS = float(os.getenv("MAX_AGE_DAYS", "7"))
+MAX_SIZE_MB = float(os.getenv("MAX_SIZE_MB", "1024"))
 CLEANUP_INTERVAL_HOURS = float(os.getenv("CLEANUP_INTERVAL_HOURS", "6"))
 NUM_WORKERS = int(os.getenv("NUM_WORKERS", "2"))
 MAX_RETRIES = 5
@@ -29,11 +28,13 @@ task_events: Dict[str, asyncio.Queue] = {}
 
 async def worker():
     """Worker to process map generation tasks."""
+    print("👷 Worker process initialized and waiting for tasks...")
     while True:
         try:
             task_data = await task_queue.get()
-            print(f"📦 Worker picked up task {task_data.get('task_id')}. Queue size: {task_queue.qsize()}")
             task_id = task_data.get("task_id")
+            print(f"📦 Worker picked up task {task_id}. Queue size: {task_queue.qsize()}")
+            
             if not task_id:
                 task_queue.task_done()
                 continue
@@ -112,7 +113,6 @@ async def worker():
                 del task_events[task_id]
         except Exception as global_e:
             print(f"CRITICAL: Worker encountered global error: {global_e}")
-            import traceback
             traceback.print_exc()
             await asyncio.sleep(1) # Prevent tight loop on error
 
@@ -163,14 +163,18 @@ async def cleanup_loop():
             
         await asyncio.sleep(CLEANUP_INTERVAL_HOURS * 3600)
 
-@app.on_event("startup")
-async def startup_event():
-    print(f"🚀 Starting backend with {NUM_WORKERS} workers...")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print(f"🚀 Starting backend lifespan with {NUM_WORKERS} workers...")
     asyncio.create_task(cleanup_loop())
     # Start workers
     for i in range(NUM_WORKERS):
         print(f"👷 Starting worker {i+1}...")
         asyncio.create_task(worker())
+    yield
+    print("🛑 Backend lifespan shutting down...")
+
+app = FastAPI(title="AesthetiMap API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -216,19 +220,14 @@ def get_themes():
         except Exception as e:
             print(f"Error loading theme {f}: {e}")
             
-    # Sort themes by name for a better UI experience
     return {"themes": sorted(themes, key=lambda x: x["name"])}
 
 @app.post("/api/generate_map_stream")
 async def generate_map_stream(req: GenerateRequest):
-    # Create unique task ID
     task_id = f"task_{int(time.time() * 1000)}"
-    
-    # Initialize event queue for this task
     event_queue = asyncio.Queue()
     task_events[task_id] = event_queue
     
-    # Add task to queue
     await task_queue.put({
         "task_id": task_id,
         "request": req
@@ -236,32 +235,32 @@ async def generate_map_stream(req: GenerateRequest):
     print(f"➕ Task {task_id} added to queue. Queue size: {task_queue.qsize()}")
     
     async def iter_output():
-        # Inform the user they are in the queue
         yield json.dumps({"type": "progress", "percent": 1, "message": "Task queued, waiting for worker..."}) + "\n"
         
         while True:
             try:
-                # Wait for events from the worker, but with a shorter interval to allow pings
                 try:
                     event = await asyncio.wait_for(event_queue.get(), timeout=15)
                     yield json.dumps(event) + "\n"
-                    
                     if event["type"] in ["done", "error"]:
                         break
                 except asyncio.TimeoutError:
-                    # Send a heartbeat to keep the HTTP connection alive
                     yield json.dumps({"type": "ping"}) + "\n"
                     continue
-                    
             except Exception as e:
                 yield json.dumps({"type": "error", "message": str(e)}) + "\n"
                 break
-
+                
     return StreamingResponse(iter_output(), media_type="application/x-ndjson")
 
 @app.get("/api/posters/{filename}")
 def get_poster(filename: str):
-    file_path = os.path.join("posters", filename)
-    if os.path.exists(file_path):
-        return FileResponse(file_path)
+    path = os.path.join("posters", filename)
+    if os.path.exists(path):
+        return FileResponse(path)
     raise HTTPException(status_code=404, detail="Poster not found")
+
+if __name__ == "__main__":
+    import uvicorn
+    # Use 1 worker for uvicorn to ensure the global task_queue works correctly
+    uvicorn.run(app, host="0.0.0.0", port=8000, workers=1)
