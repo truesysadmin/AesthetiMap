@@ -425,7 +425,7 @@ def get_crop_limits(g_proj, center_lat_lon, fig, span):
     )
 
 
-def fetch_graph(bbox) -> MultiDiGraph:
+def fetch_graph(bbox, callback=None, progress_base=None) -> MultiDiGraph:
     """
     Fetch street network graph from OpenStreetMap inside a bounding box.
     """
@@ -433,12 +433,14 @@ def fetch_graph(bbox) -> MultiDiGraph:
     graph_name = f"graph_{w:.4f}_{s:.4f}_{e:.4f}_{n:.4f}"
     cached = cache_get(graph_name)
     if cached is not None:
-        print("✓ Using cached street network")
+        log_message("✓ Using cached street network", callback, progress_base)
         return cast(MultiDiGraph, cached)
 
     max_retries = 3
     for attempt in range(max_retries):
         try:
+            if attempt > 0:
+                log_message(f"  Attempting to download street network ({attempt+1}/{max_retries})...", callback, progress_base)
             g = ox.graph_from_bbox(bbox=bbox, network_type='all', truncate_by_edge=True)
             # Rate limit between requests
             time.sleep(0.5)
@@ -450,14 +452,14 @@ def fetch_graph(bbox) -> MultiDiGraph:
         except Exception as err:
             if attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 2
-                print(f"⚠ OSMnx error while fetching graph (Attempt {attempt+1}/{max_retries}): {err}. Retrying in {wait_time}s...")
+                log_message(f"⚠ Connection issue. Retrying in {wait_time}s...", callback, progress_base)
                 time.sleep(wait_time)
             else:
-                print(f"✖ Failed to fetch graph after {max_retries} attempts: {err}")
+                log_message(f"✖ Failed to fetch graph after {max_retries} attempts: {err}", callback)
                 raise RuntimeError(f"Failed to retrieve street network data: {err}") from err
 
 
-def fetch_features(bbox, tags, name) -> GeoDataFrame:
+def fetch_features(bbox, tags, name, callback=None, progress_base=None) -> GeoDataFrame:
     """
     Fetch geographic features (water, parks, etc.) from OpenStreetMap in bbox.
     """
@@ -466,12 +468,14 @@ def fetch_features(bbox, tags, name) -> GeoDataFrame:
     features_name = f"{name}_{w:.4f}_{s:.4f}_{e:.4f}_{n:.4f}_{tag_str}"
     cached = cache_get(features_name)
     if cached is not None:
-        print(f"✓ Using cached {name}")
+        log_message(f"✓ Using cached {name}", callback, progress_base)
         return cast(GeoDataFrame, cached)
 
     max_retries = 3
     for attempt in range(max_retries):
         try:
+            if attempt > 0:
+                log_message(f"  Attempting to download {name} ({attempt+1}/{max_retries})...", callback, progress_base)
             data = ox.features_from_bbox(bbox=bbox, tags=tags)
             # Rate limit between requests
             time.sleep(0.3)
@@ -483,15 +487,15 @@ def fetch_features(bbox, tags, name) -> GeoDataFrame:
         except Exception as err:
             # Check if it is a "no results" error which is not a failure we should retry
             if "No features found" in str(err) or "found no features" in str(err).lower():
-                print(f"ℹ No features found for {name} in this area.")
+                log_message(f"ℹ No {name} features found in this area.", callback, progress_base)
                 return GeoDataFrame() # Return empty GDF
                 
             if attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 2
-                print(f"⚠ OSMnx error while fetching features {name} (Attempt {attempt+1}/{max_retries}): {err}. Retrying in {wait_time}s...")
+                log_message(f"⚠ Connection issue ({name}). Retrying in {wait_time}s...", callback, progress_base)
                 time.sleep(wait_time)
             else:
-                print(f"✖ Failed to fetch features {name} after {max_retries} attempts: {err}")
+                log_message(f"✖ Failed to fetch features {name} after {max_retries} attempts: {err}", callback)
                 # For features, we might want to return an empty GDF instead of failing entirely, 
                 # but let's raise an error to let the caller decide if it should be retried at a higher level
                 raise RuntimeError(f"Failed to retrieve {name} features: {err}") from err
@@ -570,48 +574,54 @@ def create_poster(
 
     # 1. Fetch Street Network
     log_message("Downloading street network from OSM...", callback, 10)
-    g = fetch_graph(bbox_tuple)
+    g = fetch_graph(bbox_tuple, callback=callback, progress_base=10)
     if g is None:
         raise RuntimeError("Failed to retrieve street network data.")
 
     # 2. Fetch Water Features
-    log_message("Downloading water features...", callback, 25)
+    log_message("Downloading water features...", callback, 20)
     water = fetch_features(
         bbox_tuple,
         tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
         name="water",
+        callback=callback,
+        progress_base=20
     )
 
     # 3. Fetch Parks
-    log_message("Downloading green areas...", callback, 35)
+    log_message("Downloading green areas...", callback, 30)
     parks = fetch_features(
         bbox_tuple,
-        tags={"leisure": "park", "landuse": "grass", "natural": "wood", "landuse": "forest"},
+        tags={"leisure": "park", "landuse": "grass"},
         name="parks",
+        callback=callback,
+        progress_base=30
     )
     
     # 4. Fetch Buildings (Optional)
     buildings = None
     if show_buildings:
-        log_message("Downloading building footprints (this may take a while)...", callback, 45)
+        log_message("Downloading building footprints (this may take a while)...", callback, 40)
         buildings = fetch_features(
             bbox_tuple,
             tags={"building": True},
             name="buildings",
+            callback=callback,
+            progress_base=40
         )
 
-    log_message("Initializing map layers...", callback, 65)
+    log_message("Initializing map layers...", callback, 60)
     fig, ax = plt.subplots(figsize=(width, height), facecolor=theme["bg"])
     ax.set_facecolor(theme["bg"])
     ax.set_position((0.0, 0.0, 1.0, 1.0))
 
     # Project graph to a metric CRS so distances and aspect are linear (meters)
-    log_message("Projecting street network...", callback, 68)
+    log_message("Projecting street network...", callback, 65)
     g_proj = ox.project_graph(g)
 
     # Layer 1: Water and Green Spaces
     if water is not None and not water.empty:
-        log_message("Rendering water features...", callback, 72)
+        log_message("Rendering water features...", callback, 70)
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
             try:
