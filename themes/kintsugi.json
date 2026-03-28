@@ -1,0 +1,16 @@
+{
+  "name": "Kintsugi 🏺",
+  "description": "Minimalist wabi-sabi palette: deep matte charcoal, warm ivory, and lustrous metallic gold veins.",
+  "bg": "#1A1A1A",
+  "text": "#FAF9F6",
+  "gradient_color": "#1A1A1A",
+  "water": "#121212",
+  "parks": "#212121",
+  "building": "#2C2C2C",
+  "road_motorway": "#D4AF37",
+  "road_primary": "#C5A028",
+  "road_secondary": "#FAF9F6",
+  "road_tertiary": "#F3E5AB",
+  "road_residential": "#262626",
+  "road_default": "#1F1F1F"
+}
