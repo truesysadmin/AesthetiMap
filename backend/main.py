@@ -3,6 +3,7 @@ import glob
 import json
 import asyncio
 import time
+import traceback
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -20,7 +21,7 @@ MAX_AGE_DAYS = float(os.getenv("MAX_CLEANUP_DAYS", "7"))
 MAX_SIZE_MB = float(os.getenv("MAX_CLEANUP_MB", "1024")) # default 1 GB
 CLEANUP_INTERVAL_HOURS = float(os.getenv("CLEANUP_INTERVAL_HOURS", "6"))
 NUM_WORKERS = int(os.getenv("NUM_WORKERS", "2"))
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 
 # Task queue and event storage
 task_queue = asyncio.Queue()
@@ -29,72 +30,90 @@ task_events: Dict[str, asyncio.Queue] = {}
 async def worker():
     """Worker to process map generation tasks."""
     while True:
-        task_data = await task_queue.get()
-        task_id = task_data["task_id"]
-        req = task_data["request"]
-        event_queue = task_events.get(task_id)
-        loop = asyncio.get_event_loop()
-
-        def callback(message: str, progress: Optional[int] = None):
-            if event_queue:
-                data = {"type": "log", "message": message}
-                if progress is not None:
-                    data = {"type": "progress", "percent": progress, "message": message}
-                loop.call_soon_threadsafe(lambda: event_queue.put_nowait(data))
-
-        success = False
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                if attempt > 1:
-                    callback(f"⚠️ Attempt {attempt-1} failed. Retrying ({attempt}/{MAX_RETRIES})...")
-                    await asyncio.sleep(2) # Small backoff
-
-                # Run the heavy rendering in a thread pool to avoid blocking the event loop
-                result_file = await loop.run_in_executor(
-                    None,
-                    lambda: renderer.run_generator(
-                        city=req.city,
-                        country=req.country,
-                        theme=req.theme,
-                        span=req.span,
-                        width=req.width,
-                        height=req.height,
-                        output_format=req.format,
-                        latitude=req.latitude,
-                        longitude=req.longitude,
-                        no_title=req.no_title,
-                        no_coords=req.no_coords,
-                        gradient_tb=req.gradient_tb,
-                        gradient_lr=req.gradient_lr,
-                        text_position=req.text_position,
-                        country_label=req.country_label,
-                        display_city=req.display_city,
-                        display_country=req.display_country,
-                        show_buildings=req.show_buildings,
-                        show_contours=req.show_contours,
-                        callback=callback
-                    )
-                )
+        try:
+            task_data = await task_queue.get()
+            task_id = task_data.get("task_id")
+            if not task_id:
+                task_queue.task_done()
+                continue
                 
+            req = task_data["request"]
+            event_queue = task_events.get(task_id)
+            loop = asyncio.get_event_loop()
+
+            def callback(message: str, progress: Optional[int] = None):
                 if event_queue:
-                    filename = os.path.basename(result_file)
-                    await event_queue.put({"type": "done", "url": f"/api/posters/{filename}"})
-                
-                success = True
-                break # Exit retry loop on success
+                    data = {"type": "log", "message": message}
+                    if progress is not None:
+                        data = {"type": "progress", "percent": progress, "message": message}
+                    try:
+                        loop.call_soon_threadsafe(lambda: event_queue.put_nowait(data))
+                    except Exception as ce:
+                        print(f"Callback error: {ce}")
 
-            except Exception as e:
-                print(f"Error in worker for task {task_id} (Attempt {attempt}): {e}")
-                if attempt == MAX_RETRIES:
+            success = False
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    if attempt > 1:
+                        # Exponential backoff: 2, 4, 8, 16 seconds
+                        backoff = 2 ** (attempt - 1)
+                        callback(f"⚠️ Attempt {attempt-1} failed. Retrying in {backoff}s ({attempt}/{MAX_RETRIES})...")
+                        await asyncio.sleep(backoff)
+
+                    # Run the heavy rendering in a thread pool to avoid blocking the event loop
+                    result_file = await loop.run_in_executor(
+                        None,
+                        lambda: renderer.run_generator(
+                            city=req.city,
+                            country=req.country,
+                            theme=req.theme,
+                            span=req.span,
+                            width=req.width,
+                            height=req.height,
+                            output_format=req.format,
+                            latitude=req.latitude,
+                            longitude=req.longitude,
+                            no_title=req.no_title,
+                            no_coords=req.no_coords,
+                            gradient_tb=req.gradient_tb,
+                            gradient_lr=req.gradient_lr,
+                            text_position=req.text_position,
+                            country_label=req.country_label,
+                            display_city=req.display_city,
+                            display_country=req.display_country,
+                            show_buildings=req.show_buildings,
+                            show_contours=req.show_contours,
+                            callback=callback
+                        )
+                    )
+                    
                     if event_queue:
-                        await event_queue.put({"type": "error", "message": f"Failed after {MAX_RETRIES} attempts: {str(e)}"})
-                # Continue to next attempt
+                        filename = os.path.basename(result_file)
+                        await event_queue.put({"type": "done", "url": f"/api/posters/{filename}"})
+                    
+                    success = True
+                    break # Exit retry loop on success
 
-        task_queue.task_done()
-        # Clean up event queue after some time to allow the stream to finish
-        await asyncio.sleep(10)
-        if task_id in task_events:
-            del task_events[task_id]
+                except Exception as e:
+                    print(f"Error in worker for task {task_id} (Attempt {attempt}): {e}")
+                    traceback_str = "".join(traceback.format_tb(e.__traceback__))
+                    print(f"Traceback: {traceback_str}")
+                    
+                    if attempt == MAX_RETRIES:
+                        if event_queue:
+                            await event_queue.put({"type": "error", "message": f"Failed after {MAX_RETRIES} attempts: {str(e)}"})
+                    # Continue to next attempt
+
+            task_queue.task_done()
+            # Clean up event queue after some time to allow the stream to finish
+            await asyncio.sleep(10)
+            if task_id in task_events:
+                del task_events[task_id]
+        except Exception as global_e:
+            print(f"CRITICAL: Worker encountered global error: {global_e}")
+            import traceback
+            traceback.print_exc()
+            await asyncio.sleep(1) # Prevent tight loop on error
 
 async def cleanup_loop():
     while True:

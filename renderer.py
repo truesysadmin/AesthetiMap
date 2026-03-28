@@ -21,6 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, cast, Callable, Dict, Any
 
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
@@ -423,7 +425,7 @@ def get_crop_limits(g_proj, center_lat_lon, fig, span):
     )
 
 
-def fetch_graph(bbox) -> MultiDiGraph | None:
+def fetch_graph(bbox) -> MultiDiGraph:
     """
     Fetch street network graph from OpenStreetMap inside a bounding box.
     """
@@ -434,21 +436,28 @@ def fetch_graph(bbox) -> MultiDiGraph | None:
         print("✓ Using cached street network")
         return cast(MultiDiGraph, cached)
 
-    try:
-        g = ox.graph_from_bbox(bbox=bbox, network_type='all', truncate_by_edge=True)
-        # Rate limit between requests
-        time.sleep(0.5)
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            cache_set(graph_name, g)
-        except CacheError as err:
-            print(err)
-        return g
-    except Exception as err:
-        print(f"OSMnx error while fetching graph: {err}")
-        return None
+            g = ox.graph_from_bbox(bbox=bbox, network_type='all', truncate_by_edge=True)
+            # Rate limit between requests
+            time.sleep(0.5)
+            try:
+                cache_set(graph_name, g)
+            except CacheError as err:
+                print(err)
+            return g
+        except Exception as err:
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 2
+                print(f"⚠ OSMnx error while fetching graph (Attempt {attempt+1}/{max_retries}): {err}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"✖ Failed to fetch graph after {max_retries} attempts: {err}")
+                raise RuntimeError(f"Failed to retrieve street network data: {err}") from err
 
 
-def fetch_features(bbox, tags, name) -> GeoDataFrame | None:
+def fetch_features(bbox, tags, name) -> GeoDataFrame:
     """
     Fetch geographic features (water, parks, etc.) from OpenStreetMap in bbox.
     """
@@ -460,18 +469,32 @@ def fetch_features(bbox, tags, name) -> GeoDataFrame | None:
         print(f"✓ Using cached {name}")
         return cast(GeoDataFrame, cached)
 
-    try:
-        data = ox.features_from_bbox(bbox=bbox, tags=tags)
-        # Rate limit between requests
-        time.sleep(0.3)
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            cache_set(features_name, data)
-        except CacheError as err:
-            print(err)
-        return data
-    except Exception as err:
-        print(f"OSMnx error while fetching features: {err}")
-        return None
+            data = ox.features_from_bbox(bbox=bbox, tags=tags)
+            # Rate limit between requests
+            time.sleep(0.3)
+            try:
+                cache_set(features_name, data)
+            except CacheError as err:
+                print(err)
+            return data
+        except Exception as err:
+            # Check if it is a "no results" error which is not a failure we should retry
+            if "No features found" in str(err) or "found no features" in str(err).lower():
+                print(f"ℹ No features found for {name} in this area.")
+                return GeoDataFrame() # Return empty GDF
+                
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 2
+                print(f"⚠ OSMnx error while fetching features {name} (Attempt {attempt+1}/{max_retries}): {err}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"✖ Failed to fetch features {name} after {max_retries} attempts: {err}")
+                # For features, we might want to return an empty GDF instead of failing entirely, 
+                # but let's raise an error to let the caller decide if it should be retried at a higher level
+                raise RuntimeError(f"Failed to retrieve {name} features: {err}") from err
 
 
 def create_poster(
@@ -788,8 +811,8 @@ def create_poster(
     fmt = output_format.lower()
     save_kwargs = dict(facecolor=theme["bg"], bbox_inches="tight", pad_inches=0.05)
     if fmt == "png": save_kwargs["dpi"] = 300
-    plt.savefig(output_file, format=fmt, **save_kwargs)
-    plt.close()
+    fig.savefig(output_file, format=fmt, **save_kwargs)
+    plt.close(fig)
     log_message(f"✓ Success! Poster saved: {output_file}", callback, 100)
 
 
