@@ -31,7 +31,13 @@ async def worker():
     print("👷 Worker process initialized and waiting for tasks...")
     while True:
         try:
-            task_data = await task_queue.get()
+            # Add a small timeout to get() so we can print "worker alive" logs
+            try:
+                task_data = await asyncio.wait_for(task_queue.get(), timeout=30)
+            except asyncio.TimeoutError:
+                print(f"💤 Worker alive, waiting for tasks... (Queue size: {task_queue.qsize()})")
+                continue
+                
             task_id = task_data.get("task_id")
             print(f"📦 Worker picked up task {task_id}. Queue size: {task_queue.qsize()}")
             
@@ -62,6 +68,7 @@ async def worker():
                         callback(f"⚠️ Attempt {attempt-1} failed. Retrying in {backoff}s ({attempt}/{MAX_RETRIES})...")
                         await asyncio.sleep(backoff)
 
+                    print(f"🛠️ Starting heavy rendering for {task_id}...")
                     # Run the heavy rendering in a thread pool to avoid blocking the event loop
                     result_file = await loop.run_in_executor(
                         None,
@@ -252,6 +259,14 @@ async def generate_map_stream(req: GenerateRequest):
                 break
                 
     return StreamingResponse(iter_output(), media_type="application/x-ndjson")
+
+@app.get("/api/status")
+async def get_status():
+    return {
+        "queue_size": task_queue.qsize(),
+        "num_workers": NUM_WORKERS,
+        "task_events_count": len(task_events)
+    }
 
 @app.get("/api/posters/{filename}")
 def get_poster(filename: str):

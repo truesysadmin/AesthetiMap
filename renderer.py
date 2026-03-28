@@ -853,6 +853,7 @@ def run_generator(
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """Entry point for library calls."""
+    print(f"🎬 Starting generator for {city}, {country}...")
     custom_fonts = load_fonts(font_family) if font_family else None
     if latitude and longitude:
         coords = (parse(latitude), parse(longitude))
