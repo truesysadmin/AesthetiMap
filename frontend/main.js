@@ -163,6 +163,10 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
               const data = JSON.parse(line);
               
+              if (data.type === 'ping') {
+                continue; // Keep-alive
+              }
+              
               if (data.type === 'progress') {
                 progressText.textContent = data.message;
                 if (progressBar && data.percent !== undefined) {

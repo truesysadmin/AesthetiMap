@@ -233,19 +233,22 @@ async def generate_map_stream(req: GenerateRequest):
     
     async def iter_output():
         # Inform the user they are in the queue
-        yield json.dumps({"type": "log", "message": "Task queued, waiting for worker..."}) + "\n"
+        yield json.dumps({"type": "progress", "percent": 1, "message": "Task queued, waiting for worker..."}) + "\n"
         
         while True:
             try:
-                # Wait for events from the worker
-                event = await asyncio.wait_for(event_queue.get(), timeout=300)
-                yield json.dumps(event) + "\n"
-                
-                if event["type"] in ["done", "error"]:
-                    break
-            except asyncio.TimeoutError:
-                yield json.dumps({"type": "error", "message": "Generation timed out."}) + "\n"
-                break
+                # Wait for events from the worker, but with a shorter interval to allow pings
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=15)
+                    yield json.dumps(event) + "\n"
+                    
+                    if event["type"] in ["done", "error"]:
+                        break
+                except asyncio.TimeoutError:
+                    # Send a heartbeat to keep the HTTP connection alive
+                    yield json.dumps({"type": "ping"}) + "\n"
+                    continue
+                    
             except Exception as e:
                 yield json.dumps({"type": "error", "message": str(e)}) + "\n"
                 break
