@@ -1,11 +1,12 @@
 {
-  "name": "MieresEspaña",
+  "name": "MieresEspa\u00f1a",
   "description": "Warm parchment background with Spanish colors: crimson primary and golden secondary roads",
   "bg": "#F5EFE6",
   "text": "#2C3E50",
   "gradient_color": "#F5EFE6",
   "water": "#A3C4D3",
   "parks": "#AEC8A3",
+  "building": "#CCCCCC",
   "road_motorway": "#AA151B",
   "road_primary": "#AA151B",
   "road_secondary": "#F1BF00",
