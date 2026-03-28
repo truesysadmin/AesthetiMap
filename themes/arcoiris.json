@@ -1,16 +1,16 @@
 {
   "name": "Arcoiris 🌈",
-  "description": "A vibrant spectrum of colors celebrating the full rainbow.",
+  "description": "A vibrant spectrum of colors celebrating the full rainbow with high-saturation tones.",
   "bg": "#FFFFFF",
-  "text": "#333333",
+  "text": "#1A1A1A",
   "gradient_color": "#FFFFFF",
-  "water": "#03A9F4",
-  "parks": "#8BC34A",
-  "building": "#FFEB3B",
-  "road_motorway": "#F44336",
-  "road_primary": "#FF9800",
-  "road_secondary": "#FFEB3B",
-  "road_tertiary": "#4CAF50",
-  "road_residential": "#2196F3",
-  "road_default": "#9C27B0"
+  "water": "#00BFFF",
+  "parks": "#32CD32",
+  "building": "#FFD1DC",
+  "road_motorway": "#FF0000",
+  "road_primary": "#FF7F00",
+  "road_secondary": "#FFFF00",
+  "road_tertiary": "#00FF00",
+  "road_residential": "#0000FF",
+  "road_default": "#4B0082"
 }
