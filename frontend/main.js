@@ -72,9 +72,9 @@ document.addEventListener('DOMContentLoaded', () => {
       themeSelect.innerHTML = '';
       data.themes.forEach(theme => {
         const option = document.createElement('option');
-        option.value = theme;
-        option.textContent = theme.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-        if (theme === 'terracotta') option.selected = true;
+        option.value = theme.id;
+        option.textContent = theme.name;
+        if (theme.id === 'terracotta') option.selected = true;
         themeSelect.appendChild(option);
       });
       // Set theme from URL *after* loading themes

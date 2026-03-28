@@ -183,9 +183,19 @@ class GenerateRequest(BaseModel):
 def get_themes():
     themes = []
     for f in glob.glob("themes/*.json"):
-        theme_name = os.path.basename(f).replace('.json', '')
-        themes.append(theme_name)
-    return {"themes": sorted(themes)}
+        try:
+            with open(f, 'r', encoding='utf-8') as jf:
+                data = json.load(jf)
+                theme_id = os.path.basename(f).replace('.json', '')
+                themes.append({
+                    "id": theme_id,
+                    "name": data.get("name", theme_id.replace('_', ' ').title())
+                })
+        except Exception as e:
+            print(f"Error loading theme {f}: {e}")
+            
+    # Sort themes by name for a better UI experience
+    return {"themes": sorted(themes, key=lambda x: x["name"])}
 
 @app.post("/api/generate_map_stream")
 async def generate_map_stream(req: GenerateRequest):
