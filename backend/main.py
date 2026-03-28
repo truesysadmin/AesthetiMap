@@ -27,20 +27,20 @@ MAX_RETRIES = 3
 task_queue = asyncio.Queue()
 task_events: Dict[str, asyncio.Queue] = {}
 
-# Use a ProcessPoolExecutor for heavy CPU-bound rendering to avoid GIL issues
-# and ensure isolation between workers.
-executor = concurrent.futures.ProcessPoolExecutor(max_workers=NUM_WORKERS)
+# Use a ThreadPoolExecutor for rendering
+# We will use asyncio.to_thread in newer Python or run_in_executor
+import threading
 
 async def worker():
     """Worker to process map generation tasks."""
-    print(f"👷 [PID {os.getpid()}] Worker process initialized and waiting for tasks...")
+    print(f"👷 [PID {os.getpid()}][Thread {threading.get_ident()}] Worker process initialized and waiting for tasks...")
     while True:
         try:
+            print(f"🔍 [PID {os.getpid()}] Worker checking queue... (Queue size: {task_queue.qsize()})")
             # Simple check for tasks to keep the worker loop responsive
             try:
-                task_data = await asyncio.wait_for(task_queue.get(), timeout=30)
+                task_data = await asyncio.wait_for(task_queue.get(), timeout=10)
             except asyncio.TimeoutError:
-                print(f"💤 [PID {os.getpid()}] Worker alive, waiting for tasks... (Queue size: {task_queue.qsize()})")
                 continue
                 
             task_id = task_data.get("task_id")
@@ -54,40 +54,45 @@ async def worker():
             event_queue = task_events.get(task_id)
             loop = asyncio.get_event_loop()
             
-            print(f"🛠️ [PID {os.getpid()}] Starting heavy rendering for {task_id} via ProcessPool...")
+            print(f"🛠️ [PID {os.getpid()}] Starting heavy rendering for {task_id}...")
             
             try:
-                # We use run_in_executor with our ProcessPoolExecutor
-                # We MUST NOT pass the callback as it is not picklable for ProcessPool
+                # Use a callback that puts data into the event queue
+                def thread_safe_callback(message: str, progress: Optional[int] = None):
+                    if event_queue:
+                        data = {"type": "progress", "percent": progress, "message": message}
+                        loop.call_soon_threadsafe(lambda: event_queue.put_nowait(data))
+
+                # Use run_in_executor with default (Thread) executor
                 result_file = await loop.run_in_executor(
-                    executor,
-                    renderer.run_generator,
-                    req.city,
-                    req.country,
-                    req.theme,
-                    req.span,
-                    req.width,
-                    req.height,
-                    req.format,
-                    req.latitude,
-                    req.longitude,
-                    req.no_title,
-                    req.no_coords,
-                    req.gradient_tb,
-                    req.gradient_lr,
-                    req.text_position,
-                    req.country_label,
-                    req.display_city,
-                    req.display_country,
-                    None, # font_family
-                    req.show_buildings,
-                    req.show_contours,
-                    None # callback
+                    None,
+                    lambda: renderer.run_generator(
+                        city=req.city,
+                        country=req.country,
+                        theme=req.theme,
+                        span=req.span,
+                        width=req.width,
+                        height=req.height,
+                        output_format=req.format,
+                        latitude=req.latitude,
+                        longitude=req.longitude,
+                        no_title=req.no_title,
+                        no_coords=req.no_coords,
+                        gradient_tb=req.gradient_tb,
+                        gradient_lr=req.gradient_lr,
+                        text_position=req.text_position,
+                        country_label=req.country_label,
+                        display_city=req.display_city,
+                        display_country=req.display_country,
+                        font_family=None,
+                        show_buildings=req.show_buildings,
+                        show_contours=req.show_contours,
+                        callback=thread_safe_callback
+                    )
                 )
                 
                 if event_queue:
                     filename = os.path.basename(result_file)
-                    await event_queue.put({"type": "progress", "percent": 100, "message": "Done!"})
                     await event_queue.put({"type": "done", "url": f"/api/posters/{filename}"})
                 
                 print(f"✅ [PID {os.getpid()}] Task {task_id} completed successfully.")
