@@ -32,6 +32,7 @@ async def worker():
     while True:
         try:
             task_data = await task_queue.get()
+            print(f"📦 Worker picked up task {task_data.get('task_id')}. Queue size: {task_queue.qsize()}")
             task_id = task_data.get("task_id")
             if not task_id:
                 task_queue.task_done()
@@ -164,9 +165,11 @@ async def cleanup_loop():
 
 @app.on_event("startup")
 async def startup_event():
+    print(f"🚀 Starting backend with {NUM_WORKERS} workers...")
     asyncio.create_task(cleanup_loop())
     # Start workers
-    for _ in range(NUM_WORKERS):
+    for i in range(NUM_WORKERS):
+        print(f"👷 Starting worker {i+1}...")
         asyncio.create_task(worker())
 
 app.add_middleware(
@@ -230,6 +233,7 @@ async def generate_map_stream(req: GenerateRequest):
         "task_id": task_id,
         "request": req
     })
+    print(f"➕ Task {task_id} added to queue. Queue size: {task_queue.qsize()}")
     
     async def iter_output():
         # Inform the user they are in the queue
