@@ -168,7 +168,7 @@ async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: a
             )
         )
         
-        filename = os.basename(result_file)
+        filename = os.path.basename(result_file)
         await event_queue.put({"type": "done", "url": f"/api/posters/{filename}"})
         print(f"✅ [PID {os.getpid()}] Task {task_id} finished.")
 
