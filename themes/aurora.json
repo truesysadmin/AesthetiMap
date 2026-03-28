@@ -1,0 +1,16 @@
+{
+  "name": "Aurora",
+  "description": "Deep night sky illuminated by shimmering green and violet lights.",
+  "bg": "#0B0E14",
+  "text": "#A7FF00",
+  "gradient_color": "#0B0E14",
+  "water": "#0D1117",
+  "parks": "#1A232E",
+  "building": "#161B22",
+  "road_motorway": "#00E676",
+  "road_primary": "#00B0FF",
+  "road_secondary": "#D500F9",
+  "road_tertiary": "#1DE9B6",
+  "road_residential": "#263238",
+  "road_default": "#37474F"
+}

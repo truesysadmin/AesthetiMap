@@ -1,0 +1,16 @@
+{
+  "name": "Unicorn",
+  "description": "Pastel iridescent magic with pink, purple, and mint highlights.",
+  "bg": "#FFF5FD",
+  "text": "#B39DDB",
+  "gradient_color": "#FFF5FD",
+  "water": "#E1F5FE",
+  "parks": "#F0F4C3",
+  "building": "#FCE4EC",
+  "road_motorway": "#F06292",
+  "road_primary": "#BA68C8",
+  "road_secondary": "#80CBC4",
+  "road_tertiary": "#B2EBF2",
+  "road_residential": "#FFFFFF",
+  "road_default": "#F8BBD0"
+}

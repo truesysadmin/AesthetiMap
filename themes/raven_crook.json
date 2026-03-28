@@ -1,0 +1,16 @@
+{
+  "name": "Raven Crook",
+  "description": "Dark, gothic aesthetic inspired by a raven's wing.",
+  "bg": "#000000",
+  "text": "#C0C0C0",
+  "gradient_color": "#000000",
+  "water": "#0A0A0A",
+  "parks": "#121212",
+  "building": "#1A1A1A",
+  "road_motorway": "#E0E0E0",
+  "road_primary": "#9E9E9E",
+  "road_secondary": "#757575",
+  "road_tertiary": "#424242",
+  "road_residential": "#212121",
+  "road_default": "#111111"
+}

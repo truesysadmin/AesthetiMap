@@ -1,0 +1,16 @@
+{
+  "name": "Wood",
+  "description": "Organic textures of oak, walnut, and cedar.",
+  "bg": "#F5EBE0",
+  "text": "#4E342E",
+  "gradient_color": "#F5EBE0",
+  "water": "#D5BDAF",
+  "parks": "#A3B18A",
+  "building": "#D6CCC2",
+  "road_motorway": "#582F0E",
+  "road_primary": "#7F4F24",
+  "road_secondary": "#936639",
+  "road_tertiary": "#A68A64",
+  "road_residential": "#B6AD90",
+  "road_default": "#C2B280"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Caballero Fernandez",
+  "description": "A classic blue and gold palette inspired by Spanish heritage.",
+  "bg": "#FFFFFF",
+  "text": "#003366",
+  "gradient_color": "#FFFFFF",
+  "water": "#E6F2FF",
+  "parks": "#F0FDF4",
+  "building": "#F3F4F6",
+  "road_motorway": "#B8860B",
+  "road_primary": "#DAA520",
+  "road_secondary": "#003366",
+  "road_tertiary": "#4A90E2",
+  "road_residential": "#9CA3AF",
+  "road_default": "#D1D5DB"
+}
