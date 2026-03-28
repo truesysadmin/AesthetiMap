@@ -16,8 +16,8 @@ from contextlib import asynccontextmanager
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import renderer
 
-MAX_AGE_DAYS = float(os.getenv("MAX_AGE_DAYS", "7"))
-MAX_SIZE_MB = float(os.getenv("MAX_SIZE_MB", "1024"))
+MAX_AGE_DAYS = float(os.getenv("MAX_CLEANUP_DAYS", "7"))
+MAX_SIZE_MB = float(os.getenv("MAX_CLEANUP_MB", "1024"))
 CLEANUP_INTERVAL_HOURS = float(os.getenv("CLEANUP_INTERVAL_HOURS", "6"))
 NUM_WORKERS = int(os.getenv("NUM_WORKERS", "2"))
 MAX_RETRIES = 5
@@ -28,18 +28,18 @@ task_events: Dict[str, asyncio.Queue] = {}
 
 async def worker():
     """Worker to process map generation tasks."""
-    print("👷 Worker process initialized and waiting for tasks...")
+    print(f"👷 [PID {os.getpid()}] Worker process initialized and waiting for tasks...")
     while True:
         try:
             # Add a small timeout to get() so we can print "worker alive" logs
             try:
                 task_data = await asyncio.wait_for(task_queue.get(), timeout=30)
             except asyncio.TimeoutError:
-                print(f"💤 Worker alive, waiting for tasks... (Queue size: {task_queue.qsize()})")
+                print(f"💤 [PID {os.getpid()}] Worker alive, waiting for tasks... (Queue size: {task_queue.qsize()})")
                 continue
                 
             task_id = task_data.get("task_id")
-            print(f"📦 Worker picked up task {task_id}. Queue size: {task_queue.qsize()}")
+            print(f"📦 [PID {os.getpid()}] Worker picked up task {task_id}. Queue size: {task_queue.qsize()}")
             
             if not task_id:
                 task_queue.task_done()
@@ -172,14 +172,14 @@ async def cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"🚀 Starting backend lifespan with {NUM_WORKERS} workers...")
+    print(f"🚀 [PID {os.getpid()}] Starting backend lifespan with {NUM_WORKERS} workers...")
     asyncio.create_task(cleanup_loop())
     # Start workers
     for i in range(NUM_WORKERS):
-        print(f"👷 Starting worker {i+1}...")
+        print(f"👷 [PID {os.getpid()}] Starting worker {i+1}...")
         asyncio.create_task(worker())
     yield
-    print("🛑 Backend lifespan shutting down...")
+    print(f"🛑 [PID {os.getpid()}] Backend lifespan shutting down...")
 
 app = FastAPI(title="AesthetiMap API", lifespan=lifespan)
 
@@ -239,7 +239,7 @@ async def generate_map_stream(req: GenerateRequest):
         "task_id": task_id,
         "request": req
     })
-    print(f"➕ Task {task_id} added to queue. Queue size: {task_queue.qsize()}")
+    print(f"➕ [PID {os.getpid()}] Task {task_id} added to queue. Queue size: {task_queue.qsize()}")
     
     async def iter_output():
         yield json.dumps({"type": "progress", "percent": 1, "message": "Task queued, waiting for worker..."}) + "\n"
