@@ -586,30 +586,32 @@ def create_poster(
     log_message("Downloading green areas...", callback, 35)
     parks = fetch_features(
         bbox_tuple,
-        tags={"leisure": "park", "landuse": "grass"},
+        tags={"leisure": "park", "landuse": "grass", "natural": "wood", "landuse": "forest"},
         name="parks",
     )
     
     # 4. Fetch Buildings (Optional)
     buildings = None
     if show_buildings:
-        log_message("Downloading building footprints...", callback, 45)
+        log_message("Downloading building footprints (this may take a while)...", callback, 45)
         buildings = fetch_features(
             bbox_tuple,
             tags={"building": True},
             name="buildings",
         )
 
-    log_message("Rendering layers and road hierarchies...", callback, 75)
+    log_message("Initializing map layers...", callback, 65)
     fig, ax = plt.subplots(figsize=(width, height), facecolor=theme["bg"])
     ax.set_facecolor(theme["bg"])
     ax.set_position((0.0, 0.0, 1.0, 1.0))
 
     # Project graph to a metric CRS so distances and aspect are linear (meters)
+    log_message("Projecting street network...", callback, 68)
     g_proj = ox.project_graph(g)
 
     # Layer 1: Water and Green Spaces
     if water is not None and not water.empty:
+        log_message("Rendering water features...", callback, 72)
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
             try:
@@ -619,6 +621,7 @@ def create_poster(
             water_polys.plot(ax=ax, facecolor=theme['water'], edgecolor='none', zorder=0.5)
             
     if parks is not None and not parks.empty:
+        log_message("Rendering green areas...", callback, 75)
         parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
             try:
@@ -630,7 +633,7 @@ def create_poster(
     # Layer 1.5: Elevation Contours (Optional)
     # Render here to be under roads and buildings
     if show_contours:
-        log_message("Downloading SRTM elevation data...", callback, 55)
+        log_message("Downloading SRTM elevation data...", callback, 78)
         try:
             import elevation
             import rasterio
@@ -646,13 +649,13 @@ def create_poster(
             dem_path = os.path.join(CACHE_DIR_PATH, f"srtm_{bbox_slug}.tif")
 
             if not os.path.exists(dem_path):
-                log_message("  Fetching SRTM30 tiles from NASA/USGS...", callback, 60)
+                log_message("  Fetching SRTM30 tiles from NASA/USGS...", callback, 80)
                 elevation.clip(bounds=bounds, output=os.path.abspath(dem_path), product="SRTM1")
                 elevation.clean()
             else:
-                log_message("  ✓ Using cached SRTM elevation data", callback, 60)
+                log_message("  ✓ Using cached SRTM elevation data", callback, 82)
 
-            log_message("Processing topography contours...", callback, 75)
+            log_message("Processing topography contours...", callback, 85)
 
             with rasterio.open(dem_path) as src:
                 # Sample a regular grid projected in the graph CRS
