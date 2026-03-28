@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 # Add root directory to sys.path to import renderer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -113,7 +114,7 @@ def get_themes():
         try:
             with open(f, 'r', encoding='utf-8') as jf:
                 data = json.load(jf)
-                theme_id = os.path.basename(f).replace('.json', '')
+                theme_id = Path(f).stem
                 themes.append({
                     "id": theme_id,
                     "name": data.get("name", theme_id.replace('_', ' ').title())
@@ -168,7 +169,7 @@ async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: a
             )
         )
         
-        filename = os.path.basename(result_file)
+        filename = Path(result_file).name
         await event_queue.put({"type": "done", "url": f"/api/posters/{filename}"})
         print(f"✅ [PID {os.getpid()}] Task {task_id} finished.")
 
