@@ -1,29 +1,44 @@
+# ----- Stage 1: Build dependencies -----
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgeos-dev \
+    libgdal-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only requirements first to cache them
+COPY backend/requirements.txt /app/backend_requirements.txt
+COPY requirements.txt /app/requirements.txt
+
+# Install as user to easily copy later
+RUN pip install --no-cache-dir --user -r /app/backend_requirements.txt -r /app/requirements.txt
+
+# ----- Stage 2: Slim runtime -----
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies needed for geopy, matplotlib, rasterio (GDAL), etc.
+# Only install runtime binaries (elevation requires gdal-bin and curl)
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    libgeos-dev \
     gdal-bin \
-    libgdal-dev \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Copy backend requirements wrapper
-COPY backend/requirements.txt /app/backend_requirements.txt
-RUN pip install --no-cache-dir -r /app/backend_requirements.txt
+# Copy python packages from builder
+COPY --from=builder /root/.local /root/.local
 
-# We assume the docker-compose will mount or copy the project to /app
-# which contains renderer.py and requirements.txt
-# Copy project requirements and install them securely
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Ensure path includes user installed bins
+ENV PATH=/root/.local/bin:$PATH
 
-# Copy the rest of the application
+# Clean up pycache to save more space
+RUN find /root/.local -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+
+# Copy project files
 COPY . .
 
 EXPOSE 8000
-# Run the FastAPI server
+
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
