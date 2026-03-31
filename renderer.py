@@ -749,14 +749,17 @@ def create_poster(
     if buildings is not None and not buildings.empty:
         log_message("Rendering building footprints...", callback, 88)
         try:
-            buildings_proj = ox.projection.project_gdf(buildings)
-            # Render shadow — subtle, very thin
-            shadow_offset = 0.02 * (span / width)
-            buildings_proj.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
-                ax=ax, facecolor=theme.get('text', '#000000'), alpha=0.08, edgecolor='none', linewidth=0, zorder=2
-            )
-            # Render building fill — no border
-            buildings_proj.plot(ax=ax, facecolor=theme.get('building', theme['road_residential']), edgecolor='none', linewidth=0, zorder=3)
+            # Filter out Points and LineStrings (like POI nodes tagged as buildings)
+            building_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
+            if not building_polys.empty:
+                buildings_proj = ox.projection.project_gdf(building_polys)
+                # Render shadow — subtle, very thin
+                shadow_offset = 0.02 * (span / width)
+                buildings_proj.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
+                    ax=ax, facecolor=theme.get('text', '#000000'), alpha=0.08, edgecolor='none', linewidth=0, zorder=2
+                )
+                # Render building fill — no border
+                buildings_proj.plot(ax=ax, facecolor=theme.get('building', theme['road_residential']), edgecolor='none', linewidth=0, zorder=3)
         except Exception as e:
             log_message(f"⚠ Building rendering failed: {e}", callback)
 
