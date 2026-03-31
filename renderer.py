@@ -580,37 +580,54 @@ def create_poster(
     if g is None:
         raise RuntimeError("Failed to retrieve street network data.")
 
-    # 2. Fetch Water Features
-    log_message("Downloading water features...", callback, 20)
-    water = fetch_features(
+    # 2. Fetch Combined Features (Water, Parks, Buildings) to bypass rate limitations
+    # and speed up rendering significantly by using a single Overpass HTTP request.
+    log_message("Downloading geographic features (water, parks, buildings)...", callback, 20)
+    
+    combined_tags = {
+        "natural": ["water", "bay", "strait"], 
+        "waterway": "riverbank",
+        "leisure": "park", 
+        "landuse": "grass"
+    }
+    if show_buildings:
+        combined_tags["building"] = True
+
+    all_features = fetch_features(
         bbox_tuple,
-        tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
-        name="water",
+        tags=combined_tags,
+        name="combined_features" if not show_buildings else "combined_features_with_buildings",
         callback=callback,
         progress_base=20
     )
 
-    # 3. Fetch Parks
-    log_message("Downloading green areas...", callback, 30)
-    parks = fetch_features(
-        bbox_tuple,
-        tags={"leisure": "park", "landuse": "grass"},
-        name="parks",
-        callback=callback,
-        progress_base=30
-    )
-    
-    # 4. Fetch Buildings (Optional)
+    # Split combined features back into distinct layers locally (much faster!)
+    water = None
+    parks = None
     buildings = None
-    if show_buildings:
-        log_message("Downloading building footprints (this may take a while)...", callback, 40)
-        buildings = fetch_features(
-            bbox_tuple,
-            tags={"building": True},
-            name="buildings",
-            callback=callback,
-            progress_base=40
-        )
+    
+    if all_features is not None and not all_features.empty:
+        log_message("Processing downloaded map layers...", callback, 50)
+        
+        # Water
+        water_mask = pd.Series(False, index=all_features.index)
+        if 'natural' in all_features.columns:
+            water_mask |= all_features['natural'].notna()
+        if 'waterway' in all_features.columns:
+            water_mask |= all_features['waterway'].notna()
+        water = all_features[water_mask]
+            
+        # Parks
+        parks_mask = pd.Series(False, index=all_features.index)
+        if 'leisure' in all_features.columns:
+            parks_mask |= all_features['leisure'].notna()
+        if 'landuse' in all_features.columns:
+            parks_mask |= all_features['landuse'].notna()
+        parks = all_features[parks_mask]
+            
+        # Buildings
+        if show_buildings and 'building' in all_features.columns:
+            buildings = all_features[all_features['building'].notna()]
 
     log_message("Initializing map layers...", callback, 60)
     fig, ax = plt.subplots(figsize=(width, height), facecolor=theme["bg"])
