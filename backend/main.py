@@ -117,7 +117,8 @@ def get_themes():
                 theme_id = Path(f).stem
                 themes.append({
                     "id": theme_id,
-                    "name": data.get("name", theme_id.replace('_', ' ').title())
+                    "name": data.get("name", theme_id.replace('_', ' ').title()),
+                    "description": data.get("description", "")
                 })
         except Exception as e:
             print(f"Error loading theme {f}: {e}")

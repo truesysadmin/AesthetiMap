@@ -74,6 +74,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const option = document.createElement('option');
         option.value = theme.id;
         option.textContent = theme.name;
+        if (theme.description) {
+            option.title = theme.description;
+        }
         if (theme.id === 'terracotta') option.selected = true;
         themeSelect.appendChild(option);
       });
