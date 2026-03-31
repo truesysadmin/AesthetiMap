@@ -27,6 +27,8 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
+ox.settings.timeout = 1800  # 30 minutes for large cities like London
+ox.settings.memory = 1073741824  # 1GB Overpass memory limit
 import pandas as pd
 from pyproj import Transformer
 from geopandas import GeoDataFrame
