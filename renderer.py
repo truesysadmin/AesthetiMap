@@ -525,7 +525,8 @@ def create_poster(
     text_position="bottom",
     show_buildings=False,
     show_contours=False,
-    show_heart=False,
+    poi_emoji: str = None,
+    poi_size: float = 50,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """
@@ -790,14 +791,14 @@ def create_poster(
     # Typography
     scale_factor = min(height, width) / 12.0
 
-    if show_heart:
-        log_message("Rendering heart at center...", callback, 93)
+    if poi_emoji:
+        log_message(f"Rendering emoji '{poi_emoji}' at center...", callback, 93)
         center_x = sum(crop_xlim) / 2.0
         center_y = sum(crop_ylim) / 2.0
-        # Use a classic red heart. Fallback fonts will handle the unicode glyph safely.
-        heart_size = 50 * scale_factor
-        ax.text(center_x, center_y, "♥", color="#FF2A2A", 
-                fontsize=heart_size, ha="center", va="center", zorder=100)
+        # Marker size is based on poi_size and scale factor
+        final_size = poi_size * scale_factor
+        ax.text(center_x, center_y, poi_emoji, color="#FF2A2A" if poi_emoji == "♥" else None, 
+                fontsize=final_size, ha="center", va="center", zorder=100)
 
     base_main = 60
     base_sub = 22
@@ -883,7 +884,8 @@ def run_generator(
     font_family: Optional[str] = None,
     show_buildings: bool = False,
     show_contours: bool = False,
-    show_heart: bool = False,
+    poi_emoji: Optional[str] = None,
+    poi_size: float = 50,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """Entry point for library calls."""
@@ -904,7 +906,8 @@ def run_generator(
         fonts=custom_fonts, no_title=no_title, no_coords=no_coords,
         gradient_tb=gradient_tb, gradient_lr=gradient_lr,
         text_position=text_position, show_buildings=show_buildings,
-        show_contours=show_contours, show_heart=show_heart, callback=callback
+        show_contours=show_contours, poi_emoji=poi_emoji, 
+        poi_size=poi_size, callback=callback
     )
     return output_file
 
@@ -1130,6 +1133,17 @@ Examples:
         action="store_true",
         help="Show topography contours",
     )
+    parser.add_argument(
+        "--poi-emoji",
+        type=str,
+        help="Emoji or character to display at the map center",
+    )
+    parser.add_argument(
+        "--poi-size",
+        type=float,
+        default=50,
+        help="Size of the POI marker (default: 50)",
+    )
 
     args = parser.parse_args()
 
@@ -1219,6 +1233,8 @@ Examples:
                 text_position=args.text_position,
                 show_buildings=args.show_buildings,
                 show_contours=args.show_contours,
+                poi_emoji=args.poi_emoji,
+                poi_size=args.poi_size,
             )
 
         print("\n" + "=" * 50)

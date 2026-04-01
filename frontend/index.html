@@ -173,10 +173,26 @@
                 <input type="checkbox" id="show-contours" style="width: auto; margin: 0;">
                 <label for="show-contours" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Show Topography</label>
               </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="show-heart" style="width: auto; margin: 0;">
-                <label for="show-heart" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Show Heart at Center</label>
+            <div class="form-group" style="margin-top: 1.5rem;">
+              <label for="poi-emoji">Map Marker <span style="font-size: 0.7em; opacity: 0.7;">🔒 PREMIUM</span></label>
+              <div class="select-wrapper">
+                <select id="poi-emoji">
+                  <option value="">None</option>
+                  <option value="❤">Heart (❤)</option>
+                  <option value="📍">Pin (📍)</option>
+                  <option value="🏠">Home (🏠)</option>
+                  <option value="🌟">Star (🌟)</option>
+                  <option value="🏁">Flag (🏁)</option>
+                  <option value="🎯">Target (🎯)</option>
+                  <option value="📌">Push-pin (📌)</option>
+                </select>
               </div>
+            </div>
+
+            <div id="marker-size-group" class="form-group hidden" style="margin-top: 0.5rem;">
+              <label for="poi-size">Marker Size: <span id="poi-size-val">50</span>px</label>
+              <input type="range" id="poi-size" min="10" max="150" value="50" step="5">
+            </div>
               <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <input type="checkbox" id="gradient-tb" style="width: auto; margin: 0;">
                 <label for="gradient-tb" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Show Top/Bottom Gradient</label>

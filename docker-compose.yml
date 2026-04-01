@@ -12,6 +12,7 @@ services:
     volumes:
       - ./cache:/app/cache
       - ./posters:/app/posters
+      - ./aesthetimap.db:/app/aesthetimap.db
     restart: unless-stopped
     networks:
       - internal
