@@ -779,15 +779,6 @@ def create_poster(
     ax.set_ylim(crop_ylim)
     ax.axis("off")
 
-    if show_heart:
-        log_message("Rendering heart at center...", callback, 93)
-        center_x = sum(crop_xlim) / 2.0
-        center_y = sum(crop_ylim) / 2.0
-        # Use a classic red heart. Fallback fonts will handle the unicode glyph safely.
-        heart_size = 50 * scale_factor
-        ax.text(center_x, center_y, "♥", color="#FF2A2A", 
-                fontsize=heart_size, ha="center", va="center", zorder=100)
-
     # Layer 3: Gradients
     if gradient_tb:
         create_gradient_fade(ax, theme['gradient_color'], location='bottom', zorder=10)
@@ -798,6 +789,16 @@ def create_poster(
 
     # Typography
     scale_factor = min(height, width) / 12.0
+
+    if show_heart:
+        log_message("Rendering heart at center...", callback, 93)
+        center_x = sum(crop_xlim) / 2.0
+        center_y = sum(crop_ylim) / 2.0
+        # Use a classic red heart. Fallback fonts will handle the unicode glyph safely.
+        heart_size = 50 * scale_factor
+        ax.text(center_x, center_y, "♥", color="#FF2A2A", 
+                fontsize=heart_size, ha="center", va="center", zorder=100)
+
     base_main = 60
     base_sub = 22
     base_coords = 14
