@@ -48,6 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (params.get('show_contours') === 'true') {
     document.getElementById('show-contours').checked = true;
   }
+  if (params.get('show_heart') === 'true') {
+    document.getElementById('show-heart').checked = true;
+  }
 
   // Pre-load image if shared link contains it
   if (params.has('img')) {
@@ -124,7 +127,8 @@ document.addEventListener('DOMContentLoaded', () => {
       gradient_lr: document.getElementById('gradient-lr').checked,
       text_position: document.getElementById('text-position').value,
       show_buildings: document.getElementById('show-buildings').checked,
-      show_contours: document.getElementById('show-contours').checked
+      show_contours: document.getElementById('show-contours').checked,
+      show_heart: document.getElementById('show-heart').checked
     };
 
     const lat = document.getElementById('latitude').value;

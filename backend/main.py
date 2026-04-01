@@ -106,6 +106,7 @@ class GenerateRequest(BaseModel):
     display_country: Optional[str] = None
     show_buildings: bool = False
     show_contours: bool = False
+    show_heart: bool = False
 
 @app.get("/api/themes")
 def get_themes():
@@ -166,6 +167,7 @@ async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: a
                 font_family=None,
                 show_buildings=req.show_buildings,
                 show_contours=req.show_contours,
+                show_heart=req.show_heart,
                 callback=callback
             )
         )

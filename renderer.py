@@ -525,6 +525,7 @@ def create_poster(
     text_position="bottom",
     show_buildings=False,
     show_contours=False,
+    show_heart=False,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """
@@ -777,6 +778,15 @@ def create_poster(
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
     ax.axis("off")
+
+    if show_heart:
+        log_message("Rendering heart at center...", callback, 93)
+        center_x = sum(crop_xlim) / 2.0
+        center_y = sum(crop_ylim) / 2.0
+        # Use a classic red heart. Fallback fonts will handle the unicode glyph safely.
+        heart_size = 50 * scale_factor
+        ax.text(center_x, center_y, "♥", color="#FF2A2A", 
+                fontsize=heart_size, ha="center", va="center", zorder=100)
 
     # Layer 3: Gradients
     if gradient_tb:
