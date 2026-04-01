@@ -117,7 +117,7 @@ class GenerateRequest(BaseModel):
     show_buildings: bool = False
     show_contours: bool = False
     poi_emoji: Optional[str] = None
-    poi_size: int = 50
+    poi_size: int = 25
 
 class UserCreate(BaseModel):
     email: str
