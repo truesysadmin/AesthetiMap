@@ -526,7 +526,7 @@ def create_poster(
     show_buildings=False,
     show_contours=False,
     poi_emoji: str = None,
-    poi_size: float = 50,
+    poi_size: float = 25,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """
@@ -797,7 +797,9 @@ def create_poster(
         center_y = sum(crop_ylim) / 2.0
         # Marker size is based on poi_size and scale factor
         final_size = poi_size * scale_factor
-        ax.text(center_x, center_y, poi_emoji, color="#FF2A2A" if poi_emoji == "♥" else None, 
+        # Use red color for heart emojis
+        marker_color = "#FF2A2A" if poi_emoji in ["❤", "♥", "💖", "💕"] else None
+        ax.text(center_x, center_y, poi_emoji, color=marker_color, 
                 fontsize=final_size, ha="center", va="center", zorder=100)
 
     base_main = 60
@@ -885,7 +887,7 @@ def run_generator(
     show_buildings: bool = False,
     show_contours: bool = False,
     poi_emoji: Optional[str] = None,
-    poi_size: float = 50,
+    poi_size: float = 25,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """Entry point for library calls."""
