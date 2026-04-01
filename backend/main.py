@@ -116,7 +116,8 @@ class GenerateRequest(BaseModel):
     display_country: Optional[str] = None
     show_buildings: bool = False
     show_contours: bool = False
-    show_heart: bool = False
+    poi_emoji: Optional[str] = None
+    poi_size: int = 50
 
 class UserCreate(BaseModel):
     email: str
@@ -289,7 +290,8 @@ async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: a
                 font_family=None,
                 show_buildings=req.show_buildings,
                 show_contours=req.show_contours,
-                show_heart=req.show_heart,
+                poi_emoji=req.poi_emoji,
+                poi_size=req.poi_size,
                 callback=callback
             )
         )
@@ -331,14 +333,14 @@ async def generate_map_stream(req: GenerateRequest, current_user: Optional[datab
             raise HTTPException(status_code=403, detail="SVG/PDF requires a Free or Premium account.")
         req.show_buildings = False
         req.show_contours = False
-        req.show_heart = False
+        req.poi_emoji = None
 
     premium_themes = ["kintsugi", "aurora_borealis"]
     if user_tier in ["anonymous", "free"]:
         if req.theme in premium_themes:
             raise HTTPException(status_code=403, detail="This theme is a Premium feature.")
-        if req.show_heart:
-            raise HTTPException(status_code=403, detail="Heart Emoji is a Premium feature.")
+        if req.poi_emoji:
+            raise HTTPException(status_code=403, detail="Custom Map Markers are a Premium feature.")
 
     task_id = f"task_{int(time.time() * 1000)}"
     event_queue = asyncio.Queue()

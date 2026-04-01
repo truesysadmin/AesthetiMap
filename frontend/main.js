@@ -169,7 +169,22 @@ document.addEventListener('DOMContentLoaded', () => {
   Array.from(formatSelect.options).forEach(opt => {
       if (['svg', 'pdf'].includes(opt.value)) opt.textContent += ' 🔒';
   });
-  document.querySelector('label[for="show-heart"]').innerHTML += ' <span style="font-size: 0.8em">🔒</span>';
+  const poiEmoji = document.getElementById('poi-emoji');
+  const poiSize = document.getElementById('poi-size');
+  const poiSizeVal = document.getElementById('poi-size-val');
+  const markerSizeGroup = document.getElementById('marker-size-group');
+
+  poiEmoji.addEventListener('change', () => {
+      if (poiEmoji.value) {
+          markerSizeGroup.classList.remove('hidden');
+      } else {
+          markerSizeGroup.classList.add('hidden');
+      }
+  });
+
+  poiSize.addEventListener('input', (e) => {
+      poiSizeVal.textContent = e.target.value;
+  });
 
   // Pre-fill fields from URL params
   const params = new URLSearchParams(window.location.search);
@@ -204,8 +219,13 @@ document.addEventListener('DOMContentLoaded', () => {
   if (params.get('show_contours') === 'true') {
     document.getElementById('show-contours').checked = true;
   }
-  if (params.get('show_heart') === 'true') {
-    document.getElementById('show-heart').checked = true;
+  if (params.get('poi_emoji')) {
+    poiEmoji.value = params.get('poi_emoji');
+    markerSizeGroup.classList.remove('hidden');
+  }
+  if (params.get('poi_size')) {
+    poiSize.value = params.get('poi_size');
+    poiSizeVal.textContent = params.get('poi_size');
   }
 
   // Pre-load image if shared link contains it
@@ -287,7 +307,8 @@ document.addEventListener('DOMContentLoaded', () => {
       text_position: document.getElementById('text-position').value,
       show_buildings: document.getElementById('show-buildings').checked,
       show_contours: document.getElementById('show-contours').checked,
-      show_heart: document.getElementById('show-heart').checked
+      poi_emoji: poiEmoji.value || null,
+      poi_size: parseInt(poiSize.value, 10)
     };
 
     const lat = document.getElementById('latitude').value;
