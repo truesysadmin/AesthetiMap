@@ -882,6 +882,7 @@ def run_generator(
     font_family: Optional[str] = None,
     show_buildings: bool = False,
     show_contours: bool = False,
+    show_heart: bool = False,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
 ):
     """Entry point for library calls."""
@@ -902,7 +903,7 @@ def run_generator(
         fonts=custom_fonts, no_title=no_title, no_coords=no_coords,
         gradient_tb=gradient_tb, gradient_lr=gradient_lr,
         text_position=text_position, show_buildings=show_buildings,
-        show_contours=show_contours, callback=callback
+        show_contours=show_contours, show_heart=show_heart, callback=callback
     )
     return output_file
 
