@@ -215,6 +215,21 @@ async def oauth_callback(provider: str, request: Request, db: Session = Depends(
 def read_users_me(current_user: database.User = Depends(auth.get_current_active_user)):
     return {"email": current_user.email, "tier": current_user.tier.value}
 
+@app.get("/api/users/history")
+def get_user_history(current_user: database.User = Depends(auth.get_current_active_user), db: Session = Depends(database.get_db)):
+    history_entries = db.query(database.GenerationHistory).filter(database.GenerationHistory.user_id == current_user.id).order_by(database.GenerationHistory.id.desc()).all()
+    res = []
+    for entry in history_entries:
+        res.append({
+            "id": entry.id,
+            "filename": entry.filename,
+            "city_name": entry.city_name,
+            "country_name": entry.country_name,
+            "theme": entry.theme,
+            "created_at": entry.created_at.isoformat()
+        })
+    return {"history": res}
+
 @app.get("/api/themes")
 def get_themes():
     themes = []
@@ -240,7 +255,7 @@ async def get_status():
         "active_tasks": len(task_events)
     }
 
-async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: asyncio.Queue):
+async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: asyncio.Queue, user_id: Optional[int] = None):
     """Actual worker task that runs in the background of the same process."""
     print(f"🛠️ [PID {os.getpid()}] Starting task {task_id} for {req.city}...")
     loop = asyncio.get_event_loop()
@@ -280,6 +295,19 @@ async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: a
         )
         
         filename = Path(result_file).name
+        
+        if user_id:
+            with database.SessionLocal() as session:
+                history = database.GenerationHistory(
+                    user_id=user_id,
+                    filename=filename,
+                    city_name=req.city,
+                    country_name=req.country,
+                    theme=req.theme
+                )
+                session.add(history)
+                session.commit()
+                
         await event_queue.put({"type": "done", "url": f"/api/posters/{filename}"})
         print(f"✅ [PID {os.getpid()}] Task {task_id} finished.")
 
@@ -317,7 +345,8 @@ async def generate_map_stream(req: GenerateRequest, current_user: Optional[datab
     task_events[task_id] = event_queue
     
     # Start the task IMMEDIATELY in the same process
-    asyncio.create_task(run_generation_task(task_id, req, event_queue))
+    user_id = current_user.id if current_user else None
+    asyncio.create_task(run_generation_task(task_id, req, event_queue, user_id))
     print(f"➕ [PID {os.getpid()}] Task {task_id} started directly.")
     
     async def iter_output():

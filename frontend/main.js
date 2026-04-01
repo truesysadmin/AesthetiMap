@@ -22,11 +22,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Auth Functions
   async function checkAuth() {
+    const historyNavBtn = document.getElementById('history-nav-btn');
     const token = localStorage.getItem('aesthetimap_token');
     if (!token) {
         userDisplay.textContent = 'Anonymous';
         loginNavBtn.classList.remove('hidden');
         logoutNavBtn.classList.add('hidden');
+        historyNavBtn.classList.add('hidden');
         currentTier = 'anonymous';
         return;
     }
@@ -37,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
             userDisplay.innerHTML = `${data.email} <b>[${data.tier.toUpperCase()}]</b>`;
             loginNavBtn.classList.add('hidden');
             logoutNavBtn.classList.remove('hidden');
+            historyNavBtn.classList.remove('hidden');
             currentTier = data.tier;
         } else {
             throw new Error("Invalid token");
@@ -102,6 +105,49 @@ document.addEventListener('DOMContentLoaded', () => {
         authError.textContent = err.message;
     }
   });
+
+  // History Modal Logic
+  const historyModal = document.getElementById('history-modal');
+  const historyCloseBtn = document.getElementById('history-close-btn');
+  const historyList = document.getElementById('history-list');
+  const historyLoading = document.getElementById('history-loading');
+  const historyEmpty = document.getElementById('history-empty');
+
+  document.getElementById('history-nav-btn').addEventListener('click', async () => {
+      historyModal.classList.remove('hidden');
+      historyLoading.classList.remove('hidden');
+      historyList.innerHTML = '';
+      historyList.classList.add('hidden');
+      historyEmpty.classList.add('hidden');
+
+      const token = localStorage.getItem('aesthetimap_token');
+      try {
+          const res = await fetch('/api/users/history', { headers: { 'Authorization': `Bearer ${token}` } });
+          const data = await res.json();
+          historyLoading.classList.add('hidden');
+          if (data.history && data.history.length > 0) {
+              historyList.classList.remove('hidden');
+              data.history.forEach(item => {
+                  const el = document.createElement('div');
+                  el.style.cssText = "background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;";
+                  el.innerHTML = `
+                    <div>
+                        <div style="font-weight: 600; color: #e0e7ff; margin-bottom: 0.25rem;">${item.city_name}, ${item.country_name}</div>
+                        <div style="font-size: 0.8rem; color: #9ca3af;">Theme: ${item.theme} &bull; ${new Date(item.created_at).toLocaleDateString()}</div>
+                    </div>
+                    <a href="/api/posters/${item.filename}" target="_blank" class="btn-generate" style="text-decoration: none; padding: 0.4rem 1rem; font-size: 0.85rem; border-radius: 6px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;">View Map</a>
+                  `;
+                  historyList.appendChild(el);
+              });
+          } else {
+              historyEmpty.classList.remove('hidden');
+          }
+      } catch (err) {
+          historyLoading.textContent = "Error loading history.";
+      }
+  });
+
+  historyCloseBtn.addEventListener('click', () => { historyModal.classList.add('hidden'); });
   // Handle OAuth redirect token
   const urlParams = new URLSearchParams(window.location.search);
   const oauthToken = urlParams.get('token');

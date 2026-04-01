@@ -1,7 +1,7 @@
 import enum
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Enum as SQLEnum
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Enum as SQLEnum, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 import datetime
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./aesthetimap.db"
@@ -30,6 +30,21 @@ class User(Base):
     tier = Column(SQLEnum(UserTier), default=UserTier.free, nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    generations = relationship("GenerationHistory", back_populates="user")
+
+class GenerationHistory(Base):
+    __tablename__ = "generations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    city_name = Column(String, nullable=False)
+    country_name = Column(String, nullable=False)
+    theme = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    user = relationship("User", back_populates="generations")
 
 # Dependency
 def get_db():
