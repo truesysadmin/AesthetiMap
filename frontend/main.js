@@ -56,7 +56,11 @@ document.addEventListener('DOMContentLoaded', () => {
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
           body: formData
       });
-      if (!res.ok) throw new Error((await res.json()).detail || "Login failed");
+      if (!res.ok) {
+          let errText = "Login failed";
+          try { errText = (await res.json()).detail; } catch(e) {}
+          throw new Error(errText);
+      }
       const data = await res.json();
       localStorage.setItem('aesthetimap_token', data.access_token);
   }
@@ -84,7 +88,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({email, password})
             });
-            if (!res.ok) throw new Error((await res.json()).detail || "Registration failed");
+            if (!res.ok) {
+                let errText = "Registration failed";
+                try { errText = (await res.json()).detail; } catch(e) {}
+                throw new Error(errText);
+            }
         }
         await loginRequest(email, password);
         authModal.classList.add('hidden');
