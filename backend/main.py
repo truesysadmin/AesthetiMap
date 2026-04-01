@@ -12,6 +12,12 @@ from typing import Optional, Dict
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from datetime import timedelta
+
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import Depends, status
+import backend.database as database
+import backend.auth as auth
 
 # Add root directory to sys.path to import renderer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -108,6 +114,45 @@ class GenerateRequest(BaseModel):
     show_contours: bool = False
     show_heart: bool = False
 
+class UserCreate(BaseModel):
+    email: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+@app.post("/api/auth/register", response_model=dict)
+def register_user(user: UserCreate, db: database.Session = Depends(database.get_db)):
+    db_user = auth.get_user_by_email(db, email=user.email)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    hashed_password = auth.get_password_hash(user.password)
+    new_user = database.User(email=user.email, hashed_password=hashed_password, tier=database.UserTier.free)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"message": "User registered successfully"}
+
+@app.post("/api/auth/token", response_model=Token)
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: database.Session = Depends(database.get_db)):
+    user = auth.get_user_by_email(db, email=form_data.username)
+    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.email, "tier": user.tier.value}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/users/me")
+def read_users_me(current_user: database.User = Depends(auth.get_current_active_user)):
+    return {"email": current_user.email, "tier": current_user.tier.value}
+
 @app.get("/api/themes")
 def get_themes():
     themes = []
@@ -187,7 +232,24 @@ async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: a
             del task_events[task_id]
 
 @app.post("/api/generate_map_stream")
-async def generate_map_stream(req: GenerateRequest):
+async def generate_map_stream(req: GenerateRequest, current_user: Optional[database.User] = Depends(auth.get_current_user)):
+    user_tier = current_user.tier.value if current_user else "anonymous"
+
+    # Enforce constraints based on user_tier
+    if user_tier == "anonymous":
+        if req.format in ["svg", "pdf"]:
+            raise HTTPException(status_code=403, detail="SVG/PDF requires a Free or Premium account.")
+        req.show_buildings = False
+        req.show_contours = False
+        req.show_heart = False
+
+    premium_themes = ["kintsugi", "aurora_borealis"]
+    if user_tier in ["anonymous", "free"]:
+        if req.theme in premium_themes:
+            raise HTTPException(status_code=403, detail="This theme is a Premium feature.")
+        if req.show_heart:
+            raise HTTPException(status_code=403, detail="Heart Emoji is a Premium feature.")
+
     task_id = f"task_{int(time.time() * 1000)}"
     event_queue = asyncio.Queue()
     task_events[task_id] = event_queue

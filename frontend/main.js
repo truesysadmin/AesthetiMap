@@ -7,6 +7,95 @@ document.addEventListener('DOMContentLoaded', () => {
   const submitBtn = document.getElementById('submit-btn');
   const btnText = submitBtn.querySelector('.btn-text');
   const loader = document.getElementById('loader');
+
+  const authModal = document.getElementById('auth-modal');
+  const authForm = document.getElementById('auth-form');
+  const loginNavBtn = document.getElementById('login-nav-btn');
+  const logoutNavBtn = document.getElementById('logout-nav-btn');
+  const userDisplay = document.getElementById('user-display');
+  const authError = document.getElementById('auth-error');
+  const authCancelBtn = document.getElementById('auth-cancel-btn');
+  const authSwitchBtn = document.getElementById('auth-switch-btn');
+  
+  let authMode = 'login';
+  let currentTier = 'anonymous';
+
+  // Auth Functions
+  async function checkAuth() {
+    const token = localStorage.getItem('aesthetimap_token');
+    if (!token) {
+        userDisplay.textContent = 'Anonymous';
+        loginNavBtn.classList.remove('hidden');
+        logoutNavBtn.classList.add('hidden');
+        currentTier = 'anonymous';
+        return;
+    }
+    try {
+        const res = await fetch('/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (res.ok) {
+            const data = await res.json();
+            userDisplay.innerHTML = `${data.email} <b>[${data.tier.toUpperCase()}]</b>`;
+            loginNavBtn.classList.add('hidden');
+            logoutNavBtn.classList.remove('hidden');
+            currentTier = data.tier;
+        } else {
+            throw new Error("Invalid token");
+        }
+    } catch(e) {
+        localStorage.removeItem('aesthetimap_token');
+        checkAuth();
+    }
+  }
+
+  async function loginRequest(email, password) {
+      const formData = new URLSearchParams();
+      formData.append('username', email);
+      formData.append('password', password);
+      const res = await fetch('/api/auth/token', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: formData
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Login failed");
+      const data = await res.json();
+      localStorage.setItem('aesthetimap_token', data.access_token);
+  }
+
+  loginNavBtn.addEventListener('click', () => { authModal.classList.remove('hidden'); });
+  authCancelBtn.addEventListener('click', () => { authModal.classList.add('hidden'); authError.textContent=''; });
+  logoutNavBtn.addEventListener('click', () => { localStorage.removeItem('aesthetimap_token'); checkAuth(); });
+
+  authSwitchBtn.addEventListener('click', () => {
+    authMode = authMode === 'login' ? 'register' : 'login';
+    document.getElementById('auth-title').textContent = authMode === 'login' ? 'Log In' : 'Register';
+    authSwitchBtn.textContent = authMode === 'login' ? 'Need an account? Register' : 'Already have an account? Log In';
+    authError.textContent = '';
+  });
+
+  authForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('auth-email').value;
+    const password = document.getElementById('auth-password').value;
+    authError.textContent = 'Working...';
+    try {
+        if (authMode === 'register') {
+            const res = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({email, password})
+            });
+            if (!res.ok) throw new Error((await res.json()).detail || "Registration failed");
+        }
+        await loginRequest(email, password);
+        authModal.classList.add('hidden');
+        authForm.reset();
+        checkAuth();
+    } catch(err) {
+        authError.textContent = err.message;
+    }
+  });
+
+  checkAuth();
   
   const previewPlaceholder = document.querySelector('.preview-placeholder');
   const resultImg = document.getElementById('result-img');
@@ -14,6 +103,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const downloadBtn = document.getElementById('download-btn');
 
   document.getElementById('current-year').textContent = new Date().getFullYear();
+
+  const formatSelect = document.getElementById('format');
+  Array.from(formatSelect.options).forEach(opt => {
+      if (['svg', 'pdf'].includes(opt.value)) opt.textContent += ' 🔒';
+  });
+  document.querySelector('label[for="show-heart"]').innerHTML += ' <span style="font-size: 0.8em">🔒</span>';
 
   // Pre-fill fields from URL params
   const params = new URLSearchParams(window.location.search);
@@ -80,6 +175,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (theme.description) {
             option.title = theme.description;
         }
+        if (['aurora_borealis', 'kintsugi'].includes(theme.id)) {
+            option.textContent += ' 🔒';
+        }
         if (theme.id === 'terracotta') option.selected = true;
         themeSelect.appendChild(option);
       });
@@ -144,14 +242,22 @@ document.addEventListener('DOMContentLoaded', () => {
     window.history.replaceState({}, '', `${window.location.pathname}?${searchParams.toString()}`);
 
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = localStorage.getItem('aesthetimap_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const response = await fetch('/api/generate_map_stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headers,
         body: JSON.stringify(reqData)
       });
 
       if (!response.ok) {
-        throw new Error(response.statusText);
+        let errorDet = response.statusText;
+        try {
+            errorDet = (await response.json()).detail;
+        } catch(e) {}
+        throw new Error(errorDet);
       }
 
       const reader = response.body.getReader();
