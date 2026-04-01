@@ -102,6 +102,13 @@ document.addEventListener('DOMContentLoaded', () => {
         authError.textContent = err.message;
     }
   });
+  // Handle OAuth redirect token
+  const urlParams = new URLSearchParams(window.location.search);
+  const oauthToken = urlParams.get('token');
+  if (oauthToken) {
+      localStorage.setItem('aesthetimap_token', oauthToken);
+      window.history.replaceState({}, document.title, window.location.pathname);
+  }
 
   checkAuth();
   

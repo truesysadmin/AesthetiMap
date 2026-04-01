@@ -4,20 +4,22 @@ import json
 import asyncio
 import time
 import traceback
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from starlette.middleware.sessions import SessionMiddleware
 from datetime import timedelta
 
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import Depends, status
 import backend.database as database
 import backend.auth as auth
+import backend.oauth as oauth_setup
 from sqlalchemy.orm import Session
 
 # Add root directory to sys.path to import renderer
@@ -92,6 +94,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SessionMiddleware, secret_key=auth.SECRET_KEY)
 
 class GenerateRequest(BaseModel):
     city: str
@@ -149,6 +152,64 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
         data={"sub": user.email, "tier": user.tier.value}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/auth/login/{provider}")
+async def oauth_login(provider: str, request: Request):
+    client = oauth_setup.oauth.create_client(provider)
+    if not client:
+        raise HTTPException(status_code=400, detail=f"Provider {provider} not supported or not configured")
+    redirect_uri = request.url_for('oauth_callback', provider=provider)
+    return await client.authorize_redirect(request, str(redirect_uri))
+
+@app.get("/api/auth/callback/{provider}")
+async def oauth_callback(provider: str, request: Request, db: Session = Depends(database.get_db)):
+    client = oauth_setup.oauth.create_client(provider)
+    if not client:
+        raise HTTPException(status_code=400, detail="Provider not supported")
+        
+    try:
+        token = await client.authorize_access_token(request)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Failed to authenticate with provider")
+
+    email = None
+    provider_id = None
+
+    if provider == 'google':
+        user_info = token.get('userinfo')
+        if not user_info:
+            raise HTTPException(status_code=400, detail="Failed to get user info from Google")
+        email = user_info.get("email")
+        provider_id = user_info.get("sub")
+    elif provider == 'github':
+        resp = await client.get('user', token=token)
+        profile = resp.json()
+        resp_emails = await client.get('user/emails', token=token)
+        emails = resp_emails.json()
+        primary_email = next((e['email'] for e in emails if e.get('primary')), None)
+        email = profile.get("email") or primary_email
+        provider_id = str(profile.get("id"))
+        
+    if not email:
+        raise HTTPException(status_code=400, detail="Cannot retrieve email from provider")
+
+    db_user = auth.get_user_by_email(db, email=email)
+    if not db_user:
+        db_user = database.User(email=email, auth_provider=provider, provider_id=provider_id, tier=database.UserTier.free)
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+    else:
+        if not db_user.provider_id:
+            db_user.auth_provider = provider
+            db_user.provider_id = provider_id
+            db.commit()
+
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": db_user.email, "tier": db_user.tier.value}, expires_delta=access_token_expires
+    )
+    return RedirectResponse(f"/?token={access_token}")
 
 @app.get("/api/users/me")
 def read_users_me(current_user: database.User = Depends(auth.get_current_active_user)):
