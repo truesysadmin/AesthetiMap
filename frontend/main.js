@@ -3,6 +3,7 @@ import '@fontsource/instrument-sans/500.css';
 import '@fontsource/instrument-sans/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import { svgNode } from './theme-thumbnail.js';
+import { parseCoordinate } from './preview-math.js';
 
 const $ = id => document.getElementById(id);
 const flags = ['no_title', 'no_coords', 'gradient_tb', 'gradient_lr', 'show_buildings', 'show_contours', 'show_heart'];
@@ -43,12 +44,14 @@ async function init() {
     for (const key of ['city', 'country', 'theme', 'format', 'text_position']) {
       if (params.has(key)) state[key] = params.get(key).slice(0, 80);
     }
-    for (const key of ['span', 'width', 'height', 'latitude', 'longitude']) {
+    for (const key of ['span', 'width', 'height']) {
       const value = params.get(key);
       if (!value?.trim() || !Number.isFinite(Number(value))) continue;
-      const limits = { span: [500, 50000], width: [2, 40], height: [2, 40], latitude: [-85, 85], longitude: [-180, 180] }[key];
+      const limits = { span: [500, 50000], width: [2, 40], height: [2, 40] }[key];
       state[key] = Math.min(limits[1], Math.max(limits[0], Number(value)));
     }
+    state.latitude = parseCoordinate(params.get('latitude'), 85);
+    state.longitude = parseCoordinate(params.get('longitude'), 180);
     for (const key of flags) state[key] = params.get(key) === 'true';
   }
   if (params.has('span')) $('span').step = '100';
@@ -56,6 +59,8 @@ async function init() {
   if (!['bottom', 'center', 'top'].includes(state.text_position)) state.text_position = 'bottom';
   for (const key of ['city', 'country', 'latitude', 'longitude', 'span', 'width', 'height', 'format', 'text_position']) {
     $(inputId(key)).value = state[key] ?? '';
+    // Keep the coordinate text of a link as written.
+    if (['latitude', 'longitude'].includes(key) && params.get(key)) $(key).value = params.get(key).slice(0, 40);
   }
   for (const key of flags) $(inputId(key)).checked = state[key];
   const syncSegments = () => {
@@ -154,11 +159,12 @@ async function init() {
   function readForm() {
     state.city = $('city').value;
     state.country = $('country').value;
-    for (const key of ['latitude', 'longitude', 'span', 'width', 'height']) {
+    state.latitude = parseCoordinate($('latitude').value, 85);
+    state.longitude = parseCoordinate($('longitude').value, 180);
+    for (const key of ['span', 'width', 'height']) {
       const el = $(key);
-      if (['latitude', 'longitude'].includes(key) && !el.value.trim()) continue;
       const value = Number(el.value);
-      const limits = { latitude: [-85, 85], longitude: [-180, 180], span: [500, config.max_span], width: [2, 40], height: [2, 40] }[key];
+      const limits = { span: [500, config.max_span], width: [2, 40], height: [2, 40] }[key];
       if (el.value.trim() && Number.isFinite(value) && value >= limits[0] && value <= limits[1]) state[key] = value;
     }
     for (const key of flags) state[key] = $(inputId(key)).checked;
@@ -256,11 +262,12 @@ async function init() {
     }
   });
   document.addEventListener('click', event => { if (!list.contains(event.target) && event.target !== $('city')) closeList(); });
-  if (params.size && (state.latitude == null || state.longitude == null)) {
+  if (params.size && !params.get('latitude') && !params.get('longitude') && state.city) {
     const version = editVersion;
     const country = state.country;
     geocode(state.city).then(places => {
-      const place = places.find(item => item.country?.toLowerCase() === country.toLowerCase()) || places[0];
+      // A namesake in another country would make the wrong map.
+      const place = places.find(item => !country || item.country?.toLowerCase() === country.toLowerCase());
       if (place && version === editVersion) {
         $('latitude').value = place.latitude; $('longitude').value = place.longitude;
         autocompleteCoordinates.latitude = true; autocompleteCoordinates.longitude = true; update();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { zoomForSpan, spanForZoom, sheetSize, strokePx, scaleRatio, niceScaleBar, titleText, titleSize, formatCoordinates } from '../preview-math.js';
+import { zoomForSpan, spanForZoom, sheetSize, strokePx, scaleRatio, niceScaleBar, titleText, titleSize, formatCoordinates, parseCoordinate } from '../preview-math.js';
 
 for (const lat of [0, 43, 70]) {
   for (const [width, height] of [[12, 16], [16, 12], [12, 12]]) {
@@ -58,4 +58,20 @@ test('coordinates match renderer output for both hemispheres', () => {
   assert.equal(formatCoordinates(50.4501, 30.5234), '50.4501° N / 30.5234° E');
   assert.equal(formatCoordinates(-43.12, -70), '43.1200° S / 70.0000° W');
   assert.equal(formatCoordinates(0, 0), '0.0000° N / 0.0000° E');
+});
+
+test('coordinate text in decimal and degree forms', () => {
+  const near = (text, limit, expected) => assert.ok(Math.abs(parseCoordinate(text, limit) - expected) < 1e-9, text);
+  near('41.1496', 85, 41.1496);
+  near(' -8.611 ', 180, -8.611);
+  near('8.611 W', 180, -8.611);
+  near(`41°9'0"N`, 85, 41.15);
+  near(`8°36'36"W`, 180, -8.61);
+  near('8 36 36 W', 180, -8.61);
+  near('-8 36 36', 180, -8.61);
+  near('33°52′S', 85, -33 - 52 / 60);
+  near('0', 85, 0);
+  near('-0.5', 85, -0.5);
+  for (const bad of ['', null, undefined, 'abc', '41,15', '86', '-85.1', '10 75', '1e5', '12.5.6']) assert.equal(parseCoordinate(bad, 85), null, String(bad));
+  assert.equal(parseCoordinate('181', 180), null);
 });

@@ -51,6 +51,8 @@ Set these environment variables on the backend service in the compose file:
 | `PUBLIC_TILES_URL` | Value of `TILES_URL` | Browser-accessible TileJSON endpoint for the live preview. |
 | `HTTP_USER_AGENT` | `map-poster-service/1.0` | Identifying User-Agent sent to map services. |
 
+The browser preview loads tiles directly. If you change `TILES_URL` or `PUBLIC_TILES_URL`, also add the new origin to `connect-src` in `frontend/nginx.conf`.
+
 ## Checks
 
 ```bash

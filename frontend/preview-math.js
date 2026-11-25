@@ -39,6 +39,16 @@ export function titleSize(city, width, height) {
   const length = Array.from(city).length;
   return Math.max(length > 10 ? 60 * 10 / length : 60, 10) * Math.min(width, height) / 12;
 }
+// Accepts what people paste and what old links hold: 41.15, -8.61, 41°9'0"N, 8 36 36 W.
+export function parseCoordinate(text, limit) {
+  const match = /^\s*([+-]?\d+(?:\.\d+)?)(?:\s*[°:\s]\s*(\d+(?:\.\d+)?)?)?(?:\s*['′:\s]\s*(\d+(?:\.\d+)?)?)?\s*["″]?\s*([NSEW])?\s*$/i.exec(text ?? '');
+  if (!match) return null;
+  const [, degrees, minutes = 0, seconds = 0, side = ''] = match;
+  if (minutes >= 60 || seconds >= 60) return null;
+  const size = Math.abs(degrees) + minutes / 60 + seconds / 3600;
+  const value = degrees.startsWith('-') || /[SW]/i.test(side) ? -size : size;
+  return Number.isFinite(value) && Math.abs(value) <= limit ? value : null;
+}
 export function formatCoordinates(lat, lon) {
   return `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'} / ${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`;
 }
