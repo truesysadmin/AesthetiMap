@@ -71,6 +71,6 @@ Map data © [OpenMapTiles](https://www.openmaptiles.org/) © [OpenStreetMap cont
 
 Map geometry comes from OpenMapTiles-schema vector tiles, supplied by [OpenFreeMap](https://openfreemap.org) by default. TileJSON is cached for one hour, with a stale fallback during provider outages. Tiles and geocoder JSON results are cached on disk.
 
-Provider terms are hard limits: at most four concurrent requests, 1,000 tile requests and 45 MB per user job. The renderer targets at most 200 tiles and lowers zoom if a tile set exceeds 35 MB. Individual tiles are limited to 8 MB. Requests occur only during user jobs; there is no prefetching or background refresh.
+Provider terms are hard limits: at most four concurrent requests, 1,000 tile requests and 45 MB per user job. The renderer targets at most 200 tiles and lowers zoom if a tile set exceeds 30 MB. Individual tiles are limited to 8 MB. Requests occur only during user jobs; there is no prefetching or background refresh.
 
 For self-hosting, set `TILES_URL` to any TileJSON server using the OpenMapTiles schema, for example `go-pmtiles serve`. HTTPS tile templates are required unless the TileJSON endpoint itself uses HTTP. Preserve the generated attribution: “© OpenMapTiles © OpenStreetMap contributors · aesthetimap.rastiegaiev.com”.

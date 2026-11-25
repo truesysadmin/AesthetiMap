@@ -26,7 +26,8 @@ HTTP_USER_AGENT = os.environ.get("HTTP_USER_AGENT", "map-poster-service/1.0")
 MAX_TILES = 200
 # Coarser tiles are several times smaller, so more of them fit into the byte limit.
 MAX_COARSE_TILES = 500
-MAX_BYTES = 35 * 1024 * 1024
+# Leaves room under the 45 MB job limit for a restart at a coarser zoom.
+MAX_BYTES = 30 * 1024 * 1024
 MAX_TILE_BYTES = 8 * 1024 * 1024
 WORLD = 2 * math.pi * 6378137
 ROAD_CLASSES = {"motorway": "motorway", "trunk": "primary", "primary": "primary", "secondary": "secondary",
@@ -424,6 +425,7 @@ def load_layers(point, half_width_m, half_height_m, callback=None, cancel=None, 
     for tile, data in downloaded:
         check_cancel(cancel)
         _decode_layers(layers, data, template, tile, transformer, show_buildings)
-    if not any(layers.roads.values()):
+    view = box(-half_width_m, -half_height_m, half_width_m, half_height_m)
+    if not any(shapely.intersects(lines, view).any() for lines in layers.roads.values() if lines):
         raise NoMapData("No street network in this area")
     return layers

@@ -207,11 +207,11 @@ def test_byte_limit_restart(monkeypatch):
         return [(coordinates[0], road_tile())]
 
     monkeypatch.setattr(tiles, 'download_tiles', download)
-    assert tiles.load_layers((0, 0), 1000, 1000)
+    assert tiles.load_layers((0, 0), 100000, 100000)
     assert zooms == [10, 9, 8]
     monkeypatch.setattr(tiles, 'download_tiles', Mock(side_effect=tiles._TooMuchData()))
     with pytest.raises(tiles.MapDataUnavailable):
-        tiles.load_layers((0, 0), 1000, 1000)
+        tiles.load_layers((0, 0), 100000, 100000)
 
 
 def test_hard_job_limits():
@@ -299,14 +299,21 @@ def test_all_missing_tiles_mean_provider_error(monkeypatch, statuses, error):
     serve(monkeypatch, [response(status, road_tile()) for status in statuses])
     if error:
         with pytest.raises(error):
-            tiles.load_layers((0, 0), 1000, 1000)
+            tiles.load_layers((0, 0), 5000, 5000)
     else:
-        assert tiles.load_layers((0, 0), 1000, 1000).roads['residential']
+        assert tiles.load_layers((0, 0), 5000, 5000).roads['residential']
 
 
 def test_no_roads(monkeypatch):
     with pytest.raises(tiles.NoMapData):
         load_synthetic(monkeypatch, encode({'water': [(box(0, 0, 1000, 1000), {'class': 'lake'})]}))
+
+
+def test_road_outside_view_is_no_data(monkeypatch):
+    # Tile 8192/8192 starts at 0,0; its far edge is about 2.4 km away, outside a 1 km view.
+    far = encode({'transportation': [(LineString([(4000, 4000), (4096, 4090)]), {'class': 'minor'})]})
+    with pytest.raises(tiles.NoMapData):
+        load_synthetic(monkeypatch, far)
 
 
 def test_holes_and_overlaps_pixels():
