@@ -12,23 +12,23 @@ import asyncio
 import json
 import os
 import pickle
-import glob
-import requests
 import sys
 import time
+import hashlib
+import re
+import tempfile
 import traceback
+import uuid
+from functools import partial
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, cast, Callable, Dict, Any
 
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.colors as mcolors
-import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
-ox.settings.timeout = 1800  # 30 minutes for large cities like London
-ox.settings.memory = 1073741824  # 1GB Overpass memory limit
+from osmnx._errors import InsufficientResponseError
 import pandas as pd
 from pyproj import Transformer
 from geopandas import GeoDataFrame
@@ -40,6 +40,18 @@ from networkx import MultiDiGraph
 from shapely.geometry import Point
 
 from font_management import load_fonts
+
+
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt  # noqa: E402
+
+ox.settings.requests_timeout = int(os.environ.get("OSM_REQUEST_TIMEOUT", "60"))
+ox.settings.overpass_rate_limit = False
+HTTP_USER_AGENT = os.environ.get("HTTP_USER_AGENT", "map-poster-service/1.0")
+ox.settings.http_user_agent = HTTP_USER_AGENT
+OVERPASS_URLS = [url.strip() for url in os.environ.get(
+    "OVERPASS_URLS", "https://overpass-api.de/api,https://overpass.private.coffee/api"
+).split(",") if url.strip()]
 
 
 class CacheError(Exception):
@@ -74,47 +86,39 @@ def _cache_path(key: str) -> str:
 
 
 def cache_get(key: str):
-    """
-    Retrieve a cached object by key.
-
-    Args:
-        key: Cache key identifier
-
-    Returns:
-        Cached object if found, None otherwise
-
-    Raises:
-        CacheError: If cache read operation fails
-    """
+    """Return a cached object, deleting corrupt files as cache misses."""
+    path = _cache_path(key)
     try:
-        path = _cache_path(key)
-        if not os.path.exists(path):
-            return None
-        with open(path, "rb") as f:
-            return pickle.load(f)
-    except Exception as e:
-        raise CacheError(f"Cache read failed: {e}") from e
+        with open(path, "rb") as handle:
+            return pickle.load(handle)
+    except GenerationCancelled:
+        raise
+    except FileNotFoundError:
+        return None
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
 
 
 def cache_set(key: str, value):
-    """
-    Store an object in the cache.
-
-    Args:
-        key: Cache key identifier
-        value: Object to cache (must be picklable)
-
-    Raises:
-        CacheError: If cache write operation fails
-    """
+    """Atomically replace a cached object using a temporary sibling file."""
+    temporary = None
     try:
-        if not os.path.exists(CACHE_DIR):
-            os.makedirs(CACHE_DIR)
-        path = _cache_path(key)
-        with open(path, "wb") as f:
-            pickle.dump(value, f, protocol=pickle.HIGHEST_PROTOCOL)
-    except Exception as e:
-        raise CacheError(f"Cache write failed: {e}") from e
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=CACHE_DIR, delete=False) as handle:
+            temporary = handle.name
+            pickle.dump(value, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(temporary, _cache_path(key))
+    except GenerationCancelled:
+        raise
+    except Exception as exc:
+        raise CacheError("Cache write failed") from exc
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 # Font loading now handled by font_management.py module
@@ -153,18 +157,25 @@ def is_latin_script(text):
     return (latin_count / total_alpha) > 0.8
 
 
-def generate_output_filename(city, theme_name, output_format):
-    """
-    Generate unique output filename with city, theme, and datetime.
-    """
-    if not os.path.exists(POSTERS_DIR):
-        os.makedirs(POSTERS_DIR)
+def _validate_theme_name(theme_name):
+    if not re.fullmatch(r"[a-z0-9_-]+", theme_name):
+        raise ValueError("Invalid theme name")
 
+
+def generate_output_filename(city, theme_name, output_format):
+    """Generate a unique filename confined to the poster directory."""
+    _validate_theme_name(theme_name)
+    if output_format.lower() not in {"png", "svg", "pdf"}:
+        raise ValueError("Invalid output format")
+    directory = Path(POSTERS_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    slug = re.sub(r"[^\w]+", "_", city.lower()).strip("_")[:40] or "poster"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    city_slug = city.lower().replace(" ", "_")
-    ext = output_format.lower()
-    filename = f"{city_slug}_{theme_name}_{timestamp}.{ext}"
-    return os.path.join(POSTERS_DIR, filename)
+    filename = f"{slug}_{theme_name}_{timestamp}_{uuid.uuid4().hex[:8]}.{output_format.lower()}"
+    output = directory / filename
+    if not output.resolve().is_relative_to(directory.resolve()):
+        raise ValueError("Invalid output path")
+    return str(output)
 
 
 def get_available_themes():
@@ -187,26 +198,10 @@ def load_theme(theme_name="terracotta"):
     """
     Load theme from JSON file in themes directory.
     """
+    _validate_theme_name(theme_name)
     theme_file = os.path.join(THEMES_DIR, f"{theme_name}.json")
-
-    if not os.path.exists(theme_file):
-        print(f"⚠ Theme file '{theme_file}' not found. Using default terracotta theme.")
-        # Fallback to embedded terracotta theme
-        return {
-            "name": "Terracotta",
-            "description": "Mediterranean warmth - burnt orange and clay tones on cream",
-            "bg": "#F5EDE4",
-            "text": "#8B4513",
-            "gradient_color": "#F5EDE4",
-            "water": "#A8C4C4",
-            "parks": "#E8E0D0",
-            "road_motorway": "#A0522D",
-            "road_primary": "#B8653A",
-            "road_secondary": "#C9846A",
-            "road_tertiary": "#D9A08A",
-            "road_residential": "#E5C4B0",
-            "road_default": "#D9A08A",
-        }
+    if not os.path.isfile(theme_file):
+        raise ValueError("Unknown theme")
 
     with open(theme_file, "r", encoding=FILE_ENCODING) as f:
         theme = json.load(f)
@@ -220,11 +215,114 @@ def load_theme(theme_name="terracotta"):
 # theme is now passed as an argument to rendering functions for thread safety.
 
 
-def log_message(msg: str, callback: Optional[Callable[[str, Optional[int]], None]] = None, progress: Optional[int] = None):
-    """Helper to log message and trigger callback if provided."""
+class GenerationCancelled(Exception):
+    """Raised when a caller cancels generation."""
+
+
+class MapDataUnavailable(Exception):
+    """Raised when map data services are unavailable."""
+
+
+class CityNotFound(ValueError):
+    """Raised when geocoding returns no location."""
+
+
+class NoMapData(ValueError):
+    """Raised when an area has no street network."""
+
+
+class _OverpassBusy(Exception):
+    """Interrupt OSMnx's unbounded busy-server retry loop."""
+
+
+def _check_cancel(cancel_check=None):
+    if cancel_check and cancel_check():
+        raise GenerationCancelled()
+
+
+def _cancellable_wait(seconds, cancel_check=None):
+    _check_cancel(cancel_check)
+    deadline = time.monotonic() + seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.1, remaining))
+        _check_cancel(cancel_check)
+
+
+class _OverpassTime:
+    def __init__(self, original, cancel_check):
+        self.original = original
+        self.cancel_check = cancel_check
+
+    def sleep(self, seconds):
+        _check_cancel(self.cancel_check)
+        if seconds > 10:
+            raise _OverpassBusy()
+        _cancellable_wait(seconds, self.cancel_check)
+
+    def __getattr__(self, name):
+        return getattr(self.original, name)
+
+
+def download_with_fallback(download, cancel_check=None):
+    """Bound Overpass retries and restore OSMnx global settings after each attempt."""
+    from osmnx import _overpass
+    last_error = None
+    for round_number in range(2):
+        if round_number:
+            _cancellable_wait(10, cancel_check)
+        for endpoint in OVERPASS_URLS:
+            _check_cancel(cancel_check)
+            original_url, original_time = ox.settings.overpass_url, _overpass.time
+            try:
+                ox.settings.overpass_url = endpoint
+                _overpass.time = _OverpassTime(original_time, cancel_check)
+                result = download()
+                _check_cancel(cancel_check)
+                return result
+            except (GenerationCancelled, InsufficientResponseError):
+                raise
+            except Exception as exc:
+                last_error = exc
+            finally:
+                ox.settings.overpass_url = original_url
+                _overpass.time = original_time
+    raise MapDataUnavailable("Map data download failed") from last_error
+
+
+def log_message(msg: str, callback: Optional[Callable[[str, Optional[int]], None]] = None,
+                progress: Optional[int] = None, cancel_check=None):
+    """Report progress while checking cancellation."""
+    _check_cancel(cancel_check)
     print(msg)
     if callback:
         callback(msg, progress)
+
+
+def format_coordinates(lat, lon):
+    return f"{abs(lat):.4f}° {'N' if lat >= 0 else 'S'} / {abs(lon):.4f}° {'E' if lon >= 0 else 'W'}"
+
+
+def split_layers(gdf, show_buildings):
+    """Select only features matching the requested OSM tag values."""
+    if gdf is None:
+        gdf = GeoDataFrame()
+    water = pd.Series(False, index=gdf.index)
+    parks = pd.Series(False, index=gdf.index)
+    if 'natural' in gdf:
+        water |= gdf['natural'].isin(['water', 'bay', 'strait'])
+    if 'waterway' in gdf:
+        water |= gdf['waterway'].eq('riverbank')
+    if 'leisure' in gdf:
+        parks |= gdf['leisure'].eq('park')
+    if 'landuse' in gdf:
+        parks |= gdf['landuse'].eq('grass')
+    buildings = gdf.iloc[0:0]
+    if show_buildings and 'building' in gdf:
+        buildings = gdf[gdf['building'].notna() & ~gdf['building'].isin([False, 'no'])]
+    return gdf[water], gdf[parks], buildings
 
 
 def create_gradient_fade(ax, color, location="bottom", zorder=10):
@@ -336,58 +434,33 @@ def get_edge_widths_by_type(g):
     return edge_widths
 
 
-def get_coordinates(city, country):
-    """
-    Fetches coordinates for a given city and country using geopy.
-    Includes rate limiting to be respectful to the geocoding service.
-    """
-    coords = f"coords_{city.lower()}_{country.lower()}"
+def get_coordinates(city, country, cancel_check=None):
+    """Geocode a city with a private, normalized cache key."""
+    _check_cancel(cancel_check)
+    key = hashlib.sha256(f"{city}|{country}".lower().encode()).hexdigest()
+    coords = f"coords_{key}"
     cached = cache_get(coords)
-    if cached:
-        print(f"✓ Using cached coordinates for {city}, {country}")
+    if cached is not None:
         return cached
-
-    print("Looking up coordinates...")
-    geolocator = Nominatim(user_agent="city_map_poster", timeout=10)
-
-    # Add a small delay to respect Nominatim's usage policy
-    time.sleep(1)
-
+    geolocator = Nominatim(user_agent=HTTP_USER_AGENT, timeout=10)
+    _cancellable_wait(1, cancel_check)
     try:
         location = geolocator.geocode(f"{city}, {country}")
-    except Exception as e:
-        raise ValueError(f"Geocoding failed for {city}, {country}: {e}") from e
-
-    # If geocode returned a coroutine in some environments, run it to get the result.
-    if asyncio.iscoroutine(location):
-        try:
+        if asyncio.iscoroutine(location):
             location = asyncio.run(location)
-        except RuntimeError as exc:
-            # If an event loop is already running, try using it to complete the coroutine.
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Running event loop in the same thread; raise a clear error.
-                raise RuntimeError(
-                    "Geocoder returned a coroutine while an event loop is already running. "
-                    "Run this script in a synchronous environment."
-                ) from exc
-            location = loop.run_until_complete(location)
-
-    if location:
-        # Use getattr to safely access address (helps static analyzers)
-        addr = getattr(location, "address", None)
-        if addr:
-            print(f"✓ Found: {addr}")
-        else:
-            print("✓ Found location (address not available)")
-        print(f"✓ Coordinates: {location.latitude}, {location.longitude}")
-        try:
-            cache_set(coords, (location.latitude, location.longitude))
-        except CacheError as e:
-            print(e)
-        return (location.latitude, location.longitude)
-
-    raise ValueError(f"Could not find coordinates for {city}, {country}")
+        _check_cancel(cancel_check)
+    except GenerationCancelled:
+        raise
+    except Exception as exc:
+        raise MapDataUnavailable("Geocoding service unavailable") from exc
+    if location is None:
+        raise CityNotFound("City not found")
+    result = (location.latitude, location.longitude)
+    try:
+        cache_set(coords, result)
+    except CacheError:
+        pass
+    return result
 
 
 def get_crop_limits(g_proj, center_lat_lon, fig, span):
@@ -427,80 +500,48 @@ def get_crop_limits(g_proj, center_lat_lon, fig, span):
     )
 
 
-def fetch_graph(bbox, callback=None, progress_base=None) -> MultiDiGraph:
-    """
-    Fetch street network graph from OpenStreetMap inside a bounding box.
-    """
-    w, s, e, n = bbox
-    graph_name = f"graph_{w:.4f}_{s:.4f}_{e:.4f}_{n:.4f}"
-    cached = cache_get(graph_name)
+def fetch_graph(bbox, callback=None, progress_base=None, cancel_check=None) -> MultiDiGraph:
+    """Fetch a street network with bounded endpoint fallback."""
+    _check_cancel(cancel_check)
+    w, south, east, north = bbox
+    key = f"graph_{w:.4f}_{south:.4f}_{east:.4f}_{north:.4f}"
+    cached = cache_get(key)
     if cached is not None:
-        log_message("✓ Using cached street network", callback, progress_base)
+        log_message("✓ Using cached street network", callback, progress_base, cancel_check)
         return cast(MultiDiGraph, cached)
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            if attempt > 0:
-                log_message(f"  Attempting to download street network ({attempt+1}/{max_retries})...", callback, progress_base)
-            g = ox.graph_from_bbox(bbox=bbox, network_type='all', truncate_by_edge=True)
-            # Rate limit between requests
-            time.sleep(0.5)
-            try:
-                cache_set(graph_name, g)
-            except CacheError as err:
-                print(err)
-            return g
-        except Exception as err:
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 2
-                log_message(f"⚠ Connection issue. Retrying in {wait_time}s...", callback, progress_base)
-                time.sleep(wait_time)
-            else:
-                log_message(f"✖ Failed to fetch graph after {max_retries} attempts: {err}", callback)
-                raise RuntimeError(f"Failed to retrieve street network data: {err}") from err
+    try:
+        graph = download_with_fallback(
+            lambda: ox.graph_from_bbox(bbox=bbox, network_type='all', truncate_by_edge=True), cancel_check)
+    except InsufficientResponseError as exc:
+        raise NoMapData("No street network in this area") from exc
+    if graph is None or not graph.number_of_edges():
+        raise NoMapData("No street network in this area")
+    try:
+        cache_set(key, graph)
+    except CacheError:
+        pass
+    return graph
 
 
-def fetch_features(bbox, tags, name, callback=None, progress_base=None) -> GeoDataFrame:
-    """
-    Fetch geographic features (water, parks, etc.) from OpenStreetMap in bbox.
-    """
-    w, s, e, n = bbox
-    tag_str = "_".join(tags.keys())
-    features_name = f"{name}_{w:.4f}_{s:.4f}_{e:.4f}_{n:.4f}_{tag_str}"
-    cached = cache_get(features_name)
+def fetch_features(bbox, tags, name, callback=None, progress_base=None, cancel_check=None) -> GeoDataFrame:
+    """Fetch matching features; a valid empty response is not retried."""
+    _check_cancel(cancel_check)
+    west, south, east, north = bbox
+    digest = hashlib.sha256(json.dumps(tags, sort_keys=True).encode()).hexdigest()[:12]
+    key = f"{name}_{west:.4f}_{south:.4f}_{east:.4f}_{north:.4f}_{digest}"
+    cached = cache_get(key)
     if cached is not None:
-        log_message(f"✓ Using cached {name}", callback, progress_base)
+        log_message(f"✓ Using cached {name}", callback, progress_base, cancel_check)
         return cast(GeoDataFrame, cached)
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            if attempt > 0:
-                log_message(f"  Attempting to download {name} ({attempt+1}/{max_retries})...", callback, progress_base)
-            data = ox.features_from_bbox(bbox=bbox, tags=tags)
-            # Rate limit between requests
-            time.sleep(0.3)
-            try:
-                cache_set(features_name, data)
-            except CacheError as err:
-                print(err)
-            return data
-        except Exception as err:
-            # Check if it is a "no results" error which is not a failure we should retry
-            if "No features found" in str(err) or "found no features" in str(err).lower():
-                log_message(f"ℹ No {name} features found in this area.", callback, progress_base)
-                return GeoDataFrame() # Return empty GDF
-                
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 2
-                log_message(f"⚠ Connection issue ({name}). Retrying in {wait_time}s...", callback, progress_base)
-                time.sleep(wait_time)
-            else:
-                log_message(f"✖ Failed to fetch features {name} after {max_retries} attempts: {err}", callback)
-                # For features, we might want to return an empty GDF instead of failing entirely, 
-                # but let's raise an error to let the caller decide if it should be retried at a higher level
-                raise RuntimeError(f"Failed to retrieve {name} features: {err}") from err
+    try:
+        data = download_with_fallback(lambda: ox.features_from_bbox(bbox=bbox, tags=tags), cancel_check)
+    except InsufficientResponseError:
+        data = GeoDataFrame()
+    try:
+        cache_set(key, data)
+    except CacheError:
+        pass
+    return data
 
 
 def create_poster(
@@ -527,6 +568,7 @@ def create_poster(
     show_contours=False,
     show_heart=False,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -550,25 +592,27 @@ def create_poster(
     Raises:
         RuntimeError: If street network data cannot be retrieved
     """
+    log = partial(log_message, cancel_check=cancel_check)
+    _check_cancel(cancel_check)
     # Handle display names for i18n support
     # Priority: display_city/display_country > name_label/country_label > city/country
     display_city = display_city or name_label or city
     display_country = display_country or country_label or country
 
-    log_message(f"--- Generating Map for {city}, {country} ---", callback, 2)
+    log(f"--- Generating Map for {city}, {country} ---", callback, 2)
 
-    log_message("Calculating optimal bounding box...", callback, 5)
+    log("Calculating optimal bounding box...", callback, 5)
     aspect = width / height
     buffer_margin = 1.15
     lat, lon = point
     dist = span / 2
-    if aspect < 1.0: # Portrait
+    if aspect < 1.0:  # Portrait
         dist_ns = dist * buffer_margin
         dist_ew = dist * aspect * buffer_margin
-    else: # Landscape
+    else:  # Landscape
         dist_ew = dist * buffer_margin
         dist_ns = (dist / aspect) * buffer_margin
-        
+
     north = distance(meters=dist_ns).destination(point, 0).latitude
     south = distance(meters=dist_ns).destination(point, 180).latitude
     east = distance(meters=dist_ew).destination(point, 90).longitude
@@ -576,19 +620,19 @@ def create_poster(
     bbox_tuple = (west, south, east, north)
 
     # 1. Fetch Street Network
-    log_message("Downloading street network from OSM...", callback, 10)
-    g = fetch_graph(bbox_tuple, callback=callback, progress_base=10)
+    log("Downloading street network from OSM...", callback, 10)
+    g = fetch_graph(bbox_tuple, callback=callback, progress_base=10, cancel_check=cancel_check)
     if g is None:
-        raise RuntimeError("Failed to retrieve street network data.")
+        raise NoMapData("No street network in this area")
 
     # 2. Fetch Combined Features (Water, Parks, Buildings) to bypass rate limitations
     # and speed up rendering significantly by using a single Overpass HTTP request.
-    log_message("Downloading geographic features (water, parks, buildings)...", callback, 20)
-    
+    log("Downloading geographic features (water, parks, buildings)...", callback, 20)
+
     combined_tags = {
-        "natural": ["water", "bay", "strait"], 
+        "natural": ["water", "bay", "strait"],
         "waterway": "riverbank",
-        "leisure": "park", 
+        "leisure": "park",
         "landuse": "grass"
     }
     if show_buildings:
@@ -599,267 +643,254 @@ def create_poster(
         tags=combined_tags,
         name="combined_features" if not show_buildings else "combined_features_with_buildings",
         callback=callback,
-        progress_base=20
+        progress_base=20,
+        cancel_check=cancel_check,
     )
 
-    # Split combined features back into distinct layers locally (much faster!)
-    water = None
-    parks = None
-    buildings = None
-    
-    if all_features is not None and not all_features.empty:
-        log_message("Processing downloaded map layers...", callback, 50)
-        
-        # Water
-        water_mask = pd.Series(False, index=all_features.index)
-        if 'natural' in all_features.columns:
-            water_mask |= all_features['natural'].notna()
-        if 'waterway' in all_features.columns:
-            water_mask |= all_features['waterway'].notna()
-        water = all_features[water_mask]
-            
-        # Parks
-        parks_mask = pd.Series(False, index=all_features.index)
-        if 'leisure' in all_features.columns:
-            parks_mask |= all_features['leisure'].notna()
-        if 'landuse' in all_features.columns:
-            parks_mask |= all_features['landuse'].notna()
-        parks = all_features[parks_mask]
-            
-        # Buildings
-        if show_buildings and 'building' in all_features.columns:
-            buildings = all_features[all_features['building'].notna()]
+    water, parks, buildings = split_layers(all_features, show_buildings)
 
-    log_message("Initializing map layers...", callback, 60)
+    log("Initializing map layers...", callback, 60)
     fig, ax = plt.subplots(figsize=(width, height), facecolor=theme["bg"])
-    ax.set_facecolor(theme["bg"])
-    ax.set_position((0.0, 0.0, 1.0, 1.0))
+    try:
+        ax.set_facecolor(theme["bg"])
+        ax.set_position((0.0, 0.0, 1.0, 1.0))
 
-    # Project graph to a metric CRS so distances and aspect are linear (meters)
-    log_message("Projecting street network...", callback, 65)
-    g_proj = ox.project_graph(g)
+        # Project graph to a metric CRS so distances and aspect are linear (meters)
+        log("Projecting street network...", callback, 65)
+        g_proj = ox.project_graph(g)
 
-    # Layer 1: Water and Green Spaces
-    if water is not None and not water.empty:
-        log_message("Rendering water features...", callback, 70)
-        water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
-        if not water_polys.empty:
-            try:
-                water_polys = ox.projection.project_gdf(water_polys)
-            except Exception:
+        # Layer 1: Water and Green Spaces
+        if water is not None and not water.empty:
+            log("Rendering water features...", callback, 70)
+            water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
+            if not water_polys.empty:
                 water_polys = water_polys.to_crs(g_proj.graph['crs'])
-            water_polys.plot(ax=ax, facecolor=theme['water'], edgecolor='none', zorder=0.5)
-            
-    if parks is not None and not parks.empty:
-        log_message("Rendering green areas...", callback, 75)
-        parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
-        if not parks_polys.empty:
-            try:
-                parks_polys = ox.projection.project_gdf(parks_polys)
-            except Exception:
+                water_polys.plot(ax=ax, facecolor=theme['water'], edgecolor='none', zorder=0.5)
+
+        if parks is not None and not parks.empty:
+            log("Rendering green areas...", callback, 75)
+            parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
+            if not parks_polys.empty:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
-            parks_polys.plot(ax=ax, facecolor=theme['parks'], edgecolor='none', zorder=0.8)
-            
-    # Layer 1.5: Elevation Contours (Optional)
-    # Render here to be under roads and buildings
-    if show_contours:
-        log_message("Downloading SRTM elevation data...", callback, 78)
-        try:
-            import elevation
-            import rasterio
-            from rasterio.transform import rowcol
+                parks_polys.plot(ax=ax, facecolor=theme['parks'], edgecolor='none', zorder=0.8)
 
-            west, south, east, north = bbox_tuple
-            # Add small buffer to avoid edge interpolation artifacts
-            buf = 0.01
-            bounds = (west - buf, south - buf, east + buf, north + buf)
+        # Layer 1.5: Elevation Contours (Optional)
+        # Render here to be under roads and buildings
+        if show_contours:
+            log("Downloading SRTM elevation data...", callback, 78)
+            try:
+                import elevation
+                import rasterio
+                from rasterio.transform import rowcol
 
-            # Use a slugified bounding box as cache key for the GeoTIFF
-            bbox_slug = f"{south:.3f}_{west:.3f}_{north:.3f}_{east:.3f}".replace("-", "m").replace(".", "d")
-            dem_path = os.path.join(CACHE_DIR_PATH, f"srtm_{bbox_slug}.tif")
+                west, south, east, north = bbox_tuple
+                # Add small buffer to avoid edge interpolation artifacts
+                buf = 0.01
+                bounds = (west - buf, south - buf, east + buf, north + buf)
 
-            if not os.path.exists(dem_path):
-                log_message("  Fetching SRTM30 tiles from NASA/USGS...", callback, 80)
-                elevation.clip(bounds=bounds, output=os.path.abspath(dem_path), product="SRTM1")
-                elevation.clean()
-            else:
-                log_message("  ✓ Using cached SRTM elevation data", callback, 82)
+                # Use a slugified bounding box as cache key for the GeoTIFF
+                bbox_slug = f"{south:.3f}_{west:.3f}_{north:.3f}_{east:.3f}".replace("-", "m").replace(".", "d")
+                dem_path = os.path.join(CACHE_DIR, f"srtm_{bbox_slug}.tif")
 
-            log_message("Processing topography contours...", callback, 85)
+                if not os.path.exists(dem_path):
+                    log("  Fetching SRTM30 tiles from NASA/USGS...", callback, 80)
+                    temporary = None
+                    try:
+                        with tempfile.NamedTemporaryFile(dir=CACHE_DIR, suffix=".tif", delete=False) as handle:
+                            temporary = handle.name
+                        elevation.clip(bounds=bounds, output=os.path.abspath(temporary), product="SRTM1")
+                        _check_cancel(cancel_check)
+                        os.replace(temporary, dem_path)
+                        elevation.clean()
+                    finally:
+                        if temporary and os.path.exists(temporary):
+                            os.unlink(temporary)
+                else:
+                    log("  ✓ Using cached SRTM elevation data", callback, 82)
 
-            with rasterio.open(dem_path) as src:
-                # Sample a regular grid projected in the graph CRS
-                grid_size = 60
-                lats = np.linspace(south, north, grid_size)
-                lons = np.linspace(west, east, grid_size)
-                lon_grid, lat_grid = np.meshgrid(lons, lats)
-                flat_lons = lon_grid.flatten()
-                flat_lats = lat_grid.flatten()
+                log("Processing topography contours...", callback, 85)
 
-                # Read elevation values via row/col lookup (fast, vectorized)
-                rows, cols = rowcol(src.transform, flat_lons, flat_lats)
-                rows = np.clip(rows, 0, src.height - 1)
-                cols = np.clip(cols, 0, src.width - 1)
-                data = src.read(1)
-                all_elevations = data[rows, cols].astype(float)
+                with rasterio.open(dem_path) as src:
+                    # Sample a regular grid projected in the graph CRS
+                    grid_size = 60
+                    lats = np.linspace(south, north, grid_size)
+                    lons = np.linspace(west, east, grid_size)
+                    lon_grid, lat_grid = np.meshgrid(lons, lats)
+                    flat_lons = lon_grid.flatten()
+                    flat_lats = lat_grid.flatten()
 
-                # Replace SRTM nodata values with NaN then interpolate
-                nodata = src.nodata or -32768
-                all_elevations[all_elevations == nodata] = np.nan
-                if np.isnan(all_elevations).any():
-                    nans = np.isnan(all_elevations)
-                    valid = ~nans
-                    if valid.any():
-                        all_elevations[nans] = np.interp(
-                            np.flatnonzero(nans), np.flatnonzero(valid), all_elevations[valid]
-                        )
+                    # Read elevation values via row/col lookup (fast, vectorized)
+                    rows, cols = rowcol(src.transform, flat_lons, flat_lats)
+                    rows = np.clip(rows, 0, src.height - 1)
+                    cols = np.clip(cols, 0, src.width - 1)
+                    data = src.read(1)
+                    all_elevations = data[rows, cols].astype(float)
 
-            elevations = all_elevations.reshape(lat_grid.shape)
+                    # Replace SRTM nodata values with NaN then interpolate
+                    nodata = src.nodata or -32768
+                    all_elevations[all_elevations == nodata] = np.nan
+                    if np.isnan(all_elevations).any():
+                        nans = np.isnan(all_elevations)
+                        valid = ~nans
+                        if valid.any():
+                            all_elevations[nans] = np.interp(
+                                np.flatnonzero(nans), np.flatnonzero(valid), all_elevations[valid]
+                            )
 
-            # Project grid to graph CRS for plotting
-            target_crs = g_proj.graph["crs"]
-            transformer = Transformer.from_crs("EPSG:4326", target_crs, always_xy=True)
-            x_flat, y_flat = transformer.transform(flat_lons, flat_lats)
-            x_grid = x_flat.reshape(lon_grid.shape)
-            y_grid = y_flat.reshape(lat_grid.shape)
+                elevations = all_elevations.reshape(lat_grid.shape)
 
-            min_elev, max_elev = np.nanmin(elevations), np.nanmax(elevations)
-            log_message(f"  Elevation range: {min_elev:.0f}m – {max_elev:.0f}m", callback)
-            if max_elev - min_elev > 5:
-                ax.contour(
-                    x_grid, y_grid, elevations, levels=25,
-                    colors=theme['text'], alpha=0.18, linewidths=0.25, zorder=0.7
-                )
-            else:
-                log_message("ℹ Elevation range too small for contours", callback)
-        except Exception as e:
-            log_message(f"⚠ Elevation rendering failed: {e}", callback)
-            import traceback
-            traceback.print_exc()
+                # Project grid to graph CRS for plotting
+                target_crs = g_proj.graph["crs"]
+                transformer = Transformer.from_crs("EPSG:4326", target_crs, always_xy=True)
+                x_flat, y_flat = transformer.transform(flat_lons, flat_lats)
+                x_grid = x_flat.reshape(lon_grid.shape)
+                y_grid = y_flat.reshape(lat_grid.shape)
 
+                min_elev, max_elev = np.nanmin(elevations), np.nanmax(elevations)
+                log(f"  Elevation range: {min_elev:.0f}m – {max_elev:.0f}m", callback)
+                if max_elev - min_elev > 5:
+                    ax.contour(
+                        x_grid, y_grid, elevations, levels=25,
+                        colors=theme['text'], alpha=0.18, linewidths=0.25, zorder=0.7
+                    )
+                else:
+                    log("ℹ Elevation range too small for contours", callback)
+            except GenerationCancelled:
+                raise
+            except Exception:
+                traceback.print_exc()
+                log("⚠ Elevation rendering failed", callback)
 
-    # Layer 2: Roads with hierarchy coloring
-    log_message("Applying road hierarchy colors...", callback, 80)
-    edge_colors = get_edge_colors_by_type(g_proj, theme)
-    edge_widths = get_edge_widths_by_type(g_proj)
+        # Layer 2: Roads with hierarchy coloring
+        log("Applying road hierarchy colors...", callback, 80)
+        edge_colors = get_edge_colors_by_type(g_proj, theme)
+        edge_widths = get_edge_widths_by_type(g_proj)
 
-    # Determine cropping limits to maintain the poster aspect ratio
-    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, span)
+        # Determine cropping limits to maintain the poster aspect ratio
+        crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, span)
 
-    # Draw Buildings (Layer 2)
-    if buildings is not None and not buildings.empty:
-        log_message("Rendering building footprints...", callback, 88)
-        try:
-            # Filter out Points and LineStrings (like POI nodes tagged as buildings)
-            building_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
-            if not building_polys.empty:
-                buildings_proj = ox.projection.project_gdf(building_polys)
-                # Render shadow — subtle, very thin
-                shadow_offset = 0.02 * (span / width)
-                buildings_proj.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
-                    ax=ax, facecolor=theme.get('text', '#000000'), alpha=0.08, edgecolor='none', linewidth=0, zorder=2
-                )
-                # Render building fill — no border
-                buildings_proj.plot(ax=ax, facecolor=theme.get('building', theme['road_residential']), edgecolor='none', linewidth=0, zorder=3)
-        except Exception as e:
-            log_message(f"⚠ Building rendering failed: {e}", callback)
+        # Draw Buildings (Layer 2)
+        if buildings is not None and not buildings.empty:
+            log("Rendering building footprints...", callback, 88)
+            try:
+                # Filter out Points and LineStrings (like POI nodes tagged as buildings)
+                building_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
+                if not building_polys.empty:
+                    buildings_proj = building_polys.to_crs(g_proj.graph["crs"])
+                    # Render shadow — subtle, very thin
+                    shadow_offset = 0.02 * (span / width)
+                    buildings_proj.translate(xoff=shadow_offset, yoff=-shadow_offset).plot(
+                        ax=ax, facecolor=theme.get('text', '#000000'), alpha=0.08, edgecolor='none', linewidth=0, zorder=2
+                    )
+                    # Render building fill — no border
+                    buildings_proj.plot(ax=ax, facecolor=theme.get('building', theme['road_residential']), edgecolor='none', linewidth=0, zorder=3)
+            except GenerationCancelled:
+                raise
+            except Exception:
+                traceback.print_exc()
+                log("⚠ Building rendering failed", callback)
 
-    # Plot the projected graph and then apply the cropped limits
-    log_message("Finalizing map rendering...", callback, 92)
-    ox.plot_graph(
-        g_proj, ax=ax, bgcolor=theme['bg'],
-        node_size=0,
-        edge_color=edge_colors,
-        edge_linewidth=edge_widths,
-        show=False,
-        close=False,
-    )
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xlim(crop_xlim)
-    ax.set_ylim(crop_ylim)
-    ax.axis("off")
+        # Plot the projected graph and then apply the cropped limits
+        log("Finalizing map rendering...", callback, 92)
+        ox.plot_graph(
+            g_proj, ax=ax, bgcolor=theme['bg'],
+            node_size=0,
+            edge_color=edge_colors,
+            edge_linewidth=edge_widths,
+            show=False,
+            close=False,
+        )
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_xlim(crop_xlim)
+        ax.set_ylim(crop_ylim)
+        ax.axis("off")
 
-    # Layer 3: Gradients
-    if gradient_tb:
-        create_gradient_fade(ax, theme['gradient_color'], location='bottom', zorder=10)
-        create_gradient_fade(ax, theme['gradient_color'], location='top', zorder=10)
-    if gradient_lr:
-        create_gradient_fade(ax, theme['gradient_color'], location='left', zorder=10)
-        create_gradient_fade(ax, theme['gradient_color'], location='right', zorder=10)
+        # Layer 3: Gradients
+        if gradient_tb:
+            create_gradient_fade(ax, theme['gradient_color'], location='bottom', zorder=10)
+            create_gradient_fade(ax, theme['gradient_color'], location='top', zorder=10)
+        if gradient_lr:
+            create_gradient_fade(ax, theme['gradient_color'], location='left', zorder=10)
+            create_gradient_fade(ax, theme['gradient_color'], location='right', zorder=10)
 
-    # Typography
-    scale_factor = min(height, width) / 12.0
+        # Typography
+        scale_factor = min(height, width) / 12.0
 
-    if show_heart:
-        log_message("Rendering heart at center...", callback, 93)
-        center_x = sum(crop_xlim) / 2.0
-        center_y = sum(crop_ylim) / 2.0
-        # Use a classic red heart. Fallback fonts will handle the unicode glyph safely.
-        heart_size = 50 * scale_factor
-        ax.text(center_x, center_y, "♥", color="#FF2A2A", 
-                fontsize=heart_size, ha="center", va="center", zorder=100)
+        if show_heart:
+            log("Rendering heart at center...", callback, 93)
+            center_x = sum(crop_xlim) / 2.0
+            center_y = sum(crop_ylim) / 2.0
+            # Use a classic red heart. Fallback fonts will handle the unicode glyph safely.
+            heart_size = 50 * scale_factor
+            ax.text(center_x, center_y, "♥", color="#FF2A2A",
+                    fontsize=heart_size, ha="center", va="center", zorder=100)
 
-    base_main = 60
-    base_sub = 22
-    base_coords = 14
-    base_attr = 8
+        base_main = 60
+        base_sub = 22
+        base_coords = 14
+        base_attr = 8
 
-    active_fonts = fonts or FONTS
-    if active_fonts:
-        font_sub = FontProperties(fname=active_fonts["light"], size=base_sub * scale_factor)
-        font_coords = FontProperties(fname=active_fonts["regular"], size=base_coords * scale_factor)
-        font_attr = FontProperties(fname=active_fonts["light"], size=base_attr * scale_factor)
-    else:
-        font_sub = FontProperties(family="monospace", weight="normal", size=base_sub * scale_factor)
-        font_coords = FontProperties(family="monospace", size=base_coords * scale_factor)
-        font_attr = FontProperties(family="monospace", size=base_attr * scale_factor)
+        active_fonts = fonts or FONTS
+        if active_fonts:
+            font_sub = FontProperties(fname=active_fonts["light"], size=base_sub * scale_factor)
+            font_coords = FontProperties(fname=active_fonts["regular"], size=base_coords * scale_factor)
+            font_attr = FontProperties(fname=active_fonts["light"], size=base_attr * scale_factor)
+        else:
+            font_sub = FontProperties(family="monospace", weight="normal", size=base_sub * scale_factor)
+            font_coords = FontProperties(family="monospace", size=base_coords * scale_factor)
+            font_attr = FontProperties(family="monospace", size=base_attr * scale_factor)
 
-    if is_latin_script(display_city):
-        spaced_city = "  ".join(list(display_city.upper()))
-    else:
-        spaced_city = display_city
+        if is_latin_script(display_city):
+            spaced_city = "  ".join(list(display_city.upper()))
+        else:
+            spaced_city = display_city
 
-    base_adjusted_main = base_main * scale_factor
-    city_char_count = len(display_city)
-    if city_char_count > 10:
-        length_factor = 10 / city_char_count
-        adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
-    else:
-        adjusted_font_size = base_adjusted_main
+        base_adjusted_main = base_main * scale_factor
+        city_char_count = len(display_city)
+        if city_char_count > 10:
+            length_factor = 10 / city_char_count
+            adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
+        else:
+            adjusted_font_size = base_adjusted_main
 
-    if active_fonts:
-        font_main_adjusted = FontProperties(fname=active_fonts["bold"], size=adjusted_font_size)
-    else:
-        font_main_adjusted = FontProperties(family="monospace", weight="bold", size=adjusted_font_size)
+        if active_fonts:
+            font_main_adjusted = FontProperties(fname=active_fonts["bold"], size=adjusted_font_size)
+        else:
+            font_main_adjusted = FontProperties(family="monospace", weight="bold", size=adjusted_font_size)
 
-    if text_position == "top":
-        y_city, y_sep, y_country, y_coords = 0.88, 0.862, 0.83, 0.80
-    elif text_position == "center":
-        y_city, y_sep, y_country, y_coords = 0.56, 0.542, 0.51, 0.48
-    else:  # bottom
-        y_city, y_sep, y_country, y_coords = 0.14, 0.125, 0.10, 0.07
+        if text_position == "top":
+            y_city, y_sep, y_country, y_coords = 0.88, 0.862, 0.83, 0.80
+        elif text_position == "center":
+            y_city, y_sep, y_country, y_coords = 0.56, 0.542, 0.51, 0.48
+        else:  # bottom
+            y_city, y_sep, y_country, y_coords = 0.14, 0.125, 0.10, 0.07
 
-    if not no_title:
-        ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_main_adjusted, zorder=11)
-        ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_sub, zorder=11)
-        ax.plot([0.4, 0.6], [y_sep, y_sep], transform=ax.transAxes, color=theme["text"], linewidth=1 * scale_factor, zorder=11)
+        if not no_title:
+            ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_main_adjusted, zorder=11)
+            ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_sub, zorder=11)
+            ax.plot([0.4, 0.6], [y_sep, y_sep], transform=ax.transAxes, color=theme["text"], linewidth=1 * scale_factor, zorder=11)
 
-    if not no_coords:
-        lat, lon = point
-        coords_text = f"{lat:.4f}° N / {lon:.4f}° E" if lat >= 0 else f"{abs(lat):.4f}° S / {lon:.4f}° E"
-        if lon < 0: coords_text = coords_text.replace("E", "W")
-        ax.text(0.5, y_coords, coords_text, transform=ax.transAxes, color=theme["text"], alpha=0.7, ha="center", fontproperties=font_coords, zorder=11)
+        if not no_coords:
+            lat, lon = point
+            coords_text = format_coordinates(lat, lon)
+            ax.text(0.5, y_coords, coords_text, transform=ax.transAxes, color=theme["text"], alpha=0.7, ha="center", fontproperties=font_coords, zorder=11)
 
-    ax.text(0.98, 0.02, "aesthetimap.rastiegaiev.com", transform=ax.transAxes, color=theme["text"], alpha=0.5, ha="right", va="bottom", fontproperties=font_attr, zorder=11)
+        ax.text(
+            0.98, 0.02, "© OpenStreetMap contributors · aesthetimap.rastiegaiev.com",
+            transform=ax.transAxes, color=theme["text"], alpha=0.7, ha="right", va="bottom",
+            fontproperties=font_attr, zorder=11,
+        )
 
-    # 5. Save
-    log_message(f"Saving to {output_file}...", callback, 95)
-    fmt = output_format.lower()
-    save_kwargs = dict(facecolor=theme["bg"], bbox_inches="tight", pad_inches=0.05)
-    if fmt == "png": save_kwargs["dpi"] = 300
-    fig.savefig(output_file, format=fmt, **save_kwargs)
-    plt.close(fig)
-    log_message(f"✓ Success! Poster saved: {output_file}", callback, 100)
+        # 5. Save
+        log(f"Saving to {output_file}...", callback, 95)
+        fmt = output_format.lower()
+        save_kwargs = dict(facecolor=theme["bg"], bbox_inches="tight", pad_inches=0.05)
+        if fmt == "png":
+            save_kwargs["dpi"] = 300
+        fig.savefig(output_file, format=fmt, **save_kwargs)
+        log(f"✓ Success! Poster saved: {output_file}", callback, 100)
+    finally:
+        plt.close(fig)
 
 
 def run_generator(
@@ -885,14 +916,15 @@ def run_generator(
     show_contours: bool = False,
     show_heart: bool = False,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ):
     """Entry point for library calls."""
-    print(f"🎬 Starting generator for {city}, {country}...")
+    _check_cancel(cancel_check)
     custom_fonts = load_fonts(font_family) if font_family else None
     if latitude and longitude:
         coords = (parse(latitude), parse(longitude))
     else:
-        coords = get_coordinates(city, country)
+        coords = get_coordinates(city, country, cancel_check=cancel_check)
 
     loaded_theme = load_theme(theme)
     output_file = generate_output_filename(city, theme, output_format)
@@ -904,7 +936,7 @@ def run_generator(
         fonts=custom_fonts, no_title=no_title, no_coords=no_coords,
         gradient_tb=gradient_tb, gradient_lr=gradient_lr,
         text_position=text_position, show_buildings=show_buildings,
-        show_contours=show_contours, show_heart=show_heart, callback=callback
+        show_contours=show_contours, show_heart=show_heart, callback=callback, cancel_check=cancel_check
     )
     return output_file
 
@@ -924,30 +956,29 @@ Examples:
   python renderer.py -c "Barcelona" -C "Spain" -t warm_beige --span 16000 # Eixample district grid
 
   # Waterfront & canals
-  python create_map_poster.py -c "Venice" -C "Italy" -t blueprint -d 4000       # Canal network
-  python create_map_poster.py -c "Amsterdam" -C "Netherlands" -t ocean -d 6000  # Concentric canals
-  python create_map_poster.py -c "Dubai" -C "UAE" -t midnight_blue -d 15000     # Palm & coastline
+  python renderer.py -c "Venice" -C "Italy" -t blueprint --span 4000       # Canal network
+  python renderer.py -c "Amsterdam" -C "Netherlands" -t ocean --span 6000  # Concentric canals
+  python renderer.py -c "Dubai" -C "UAE" -t midnight_blue --span 15000     # Palm & coastline
 
   # Radial patterns
-  python create_map_poster.py -c "Paris" -C "France" -t pastel_dream -d 10000   # Haussmann boulevards
-  python create_map_poster.py -c "Moscow" -C "Russia" -t noir -d 12000          # Ring roads
+  python renderer.py -c "Paris" -C "France" -t pastel_dream --span 10000   # Haussmann boulevards
 
   # Organic old cities
-  python create_map_poster.py -c "Tokyo" -C "Japan" -t japanese_ink -d 15000    # Dense organic streets
-  python create_map_poster.py -c "Marrakech" -C "Morocco" -t terracotta -d 5000 # Medina maze
-  python create_map_poster.py -c "Rome" -C "Italy" -t warm_beige -d 8000        # Ancient street layout
+  python renderer.py -c "Tokyo" -C "Japan" -t japanese_ink --span 15000    # Dense organic streets
+  python renderer.py -c "Marrakech" -C "Morocco" -t terracotta --span 5000 # Medina maze
+  python renderer.py -c "Rome" -C "Italy" -t warm_beige --span 8000        # Ancient street layout
 
   # Coastal cities
-  python create_map_poster.py -c "San Francisco" -C "USA" -t sunset -d 10000    # Peninsula grid
-  python create_map_poster.py -c "Sydney" -C "Australia" -t ocean -d 12000      # Harbor city
-  python create_map_poster.py -c "Mumbai" -C "India" -t contrast_zones -d 18000 # Coastal peninsula
+  python renderer.py -c "San Francisco" -C "USA" -t sunset --span 10000    # Peninsula grid
+  python renderer.py -c "Sydney" -C "Australia" -t ocean --span 12000      # Harbor city
+  python renderer.py -c "Mumbai" -C "India" -t contrast_zones --span 18000 # Coastal peninsula
 
   # River cities
-  python create_map_poster.py -c "London" -C "UK" -t noir -d 15000              # Thames curves
-  python create_map_poster.py -c "Budapest" -C "Hungary" -t copper_patina -d 8000  # Danube split
+  python renderer.py -c "London" -C "UK" -t noir --span 15000              # Thames curves
+  python renderer.py -c "Budapest" -C "Hungary" -t copper_patina --span 8000  # Danube split
 
   # List themes
-  python create_map_poster.py --list-themes
+  python renderer.py --list-themes
 
 Options:
   --city, -c        City name (required)
@@ -955,10 +986,10 @@ Options:
   --country-label   Override country text displayed on poster
   --theme, -t       Theme name (default: terracotta)
   --all-themes      Generate posters for all themes
-  --distance, -d    Map radius in meters (default: 18000)
+  --span, -d        Map span in meters (default: 20000)
   --list-themes     List all available themes
 
-Distance guide:
+Span guide:
   4000-6000m   Small/dense cities (Venice, Amsterdam old center)
   8000-12000m  Medium cities, focused downtown (Paris, Barcelona)
   15000-20000m Large metros, full city view (Tokyo, Mumbai)
@@ -994,17 +1025,17 @@ def list_themes():
         print()
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Generate beautiful map posters for any city",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python create_map_poster.py --city "New York" --country "USA"
-  python create_map_poster.py --city "New York" --country "USA" -l 40.776676 -73.971321 --theme neon_cyberpunk
-  python create_map_poster.py --city Tokyo --country Japan --theme midnight_blue
-  python create_map_poster.py --city Paris --country France --theme noir --distance 15000
-  python create_map_poster.py --list-themes
+  python renderer.py --city "New York" --country "USA"
+  python renderer.py --city "New York" --country "USA" --latitude 40.776676 --longitude -73.971321 --theme neon_cyberpunk
+  python renderer.py --city Tokyo --country Japan --theme midnight_blue
+  python renderer.py --city Paris --country France --theme noir --span 15000
+  python renderer.py --list-themes
         """,
     )
 
@@ -1131,6 +1162,7 @@ Examples:
         help="Show topography contours",
     )
 
+    parser.add_argument("--show-heart", action="store_true", help="Show a heart at the map center")
     args = parser.parse_args()
 
     # If no arguments provided, show examples
@@ -1206,8 +1238,9 @@ Examples:
                 args.span,
                 output_file,
                 args.format,
-                args.width,
-                args.height,
+                theme=THEME,
+                width=args.width,
+                height=args.height,
                 country_label=args.country_label,
                 display_city=args.display_city,
                 display_country=args.display_country,
@@ -1219,15 +1252,22 @@ Examples:
                 text_position=args.text_position,
                 show_buildings=args.show_buildings,
                 show_contours=args.show_contours,
+                show_heart=args.show_heart,
             )
 
         print("\n" + "=" * 50)
         print("✓ Poster generation complete!")
         print("=" * 50)
 
+    except GenerationCancelled:
+        raise
     except Exception as e:
         print(f"\n✗ Error: {e}")
-        import traceback
 
+        import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

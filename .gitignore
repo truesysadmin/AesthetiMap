@@ -1,4 +1,4 @@
-cache/*
+cache/
 
 # Virtual environments
 env/
@@ -23,7 +23,7 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
-.cache/*
+.cache/
 
 # Package manager
 uv.lock
@@ -36,3 +36,8 @@ htmlcov/
 
 # Generated posters
 posters/
+
+# Local data and frontend dependencies
+*.db
+node_modules/
+frontend/dist/

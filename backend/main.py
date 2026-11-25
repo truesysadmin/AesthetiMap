@@ -1,106 +1,57 @@
-import os
+import asyncio
 import glob
 import json
-import asyncio
-import time
-import traceback
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional, Dict
+import logging
+import math
+import os
 import sys
+import threading
+import time
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal, Optional
+from urllib.parse import quote
+from uuid import uuid4
 
-# Add root directory to sys.path to import renderer
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
+from lat_lon_parser import parse
+from pydantic import BaseModel, Field, field_validator, model_validator
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import renderer
+import renderer  # noqa: E402
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("aesthetimap")
 MAX_AGE_DAYS = float(os.getenv("MAX_CLEANUP_DAYS", "7"))
 MAX_SIZE_MB = float(os.getenv("MAX_CLEANUP_MB", "1024"))
 CLEANUP_INTERVAL_HOURS = float(os.getenv("CLEANUP_INTERVAL_HOURS", "6"))
+MAX_SPAN_M = int(os.getenv("MAX_SPAN_M", "50000"))
+MAX_QUEUED = int(os.getenv("MAX_QUEUED", "5"))
+JOB_TIMEOUT_SECONDS = float(os.getenv("JOB_TIMEOUT_SECONDS", "600"))
+POSTERS_DIR = Path(renderer.POSTERS_DIR)
+BUSY_MESSAGE = "The service is busy. Please try again in a minute."
+TIMEOUT_MESSAGE = "The map took too long to generate. Try a smaller area."
 
-# Global storage for task events to allow streaming
-task_events: Dict[str, asyncio.Queue] = {}
-
-async def cleanup_loop():
-    """Background loop to clean up old posters and cache files."""
-    print(f"🧹 [PID {os.getpid()}] Cleanup loop started.")
-    while True:
-        try:
-            for directory in ["posters", "cache"]:
-                if not os.path.exists(directory):
-                    continue
-                
-                if MAX_AGE_DAYS > 0:
-                    cutoff = time.time() - (MAX_AGE_DAYS * 86400)
-                    for root, _, files in os.walk(directory):
-                        for file in files:
-                            path = os.path.join(root, file)
-                            if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
-                                os.remove(path)
-                                print(f"Cleaned up old file: {path}")
-
-                if MAX_SIZE_MB > 0:
-                    total_size = 0
-                    all_files = []
-                    for root, _, files in os.walk(directory):
-                        for file in files:
-                            path = os.path.join(root, file)
-                            if os.path.isfile(path):
-                                size = os.path.getsize(path)
-                                total_size += size
-                                all_files.append((path, size, os.path.getmtime(path)))
-                    
-                    target_bytes = MAX_SIZE_MB * 1024 * 1024
-                    if total_size > target_bytes:
-                        all_files.sort(key=lambda x: x[2])
-                        for path, size, _ in all_files:
-                            try:
-                                os.remove(path)
-                                total_size -= size
-                                if total_size <= target_bytes:
-                                    break
-                            except OSError:
-                                pass
-        except Exception as e:
-            print(f"Automatic cleanup error: {e}")
-            
-        await asyncio.sleep(CLEANUP_INTERVAL_HOURS * 3600)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print(f"🚀 [PID {os.getpid()}] Starting backend lifespan...")
-    asyncio.create_task(cleanup_loop())
-    yield
-    print(f"🛑 [PID {os.getpid()}] Backend lifespan shutting down...")
-
-app = FastAPI(title="AesthetiMap API", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 class GenerateRequest(BaseModel):
     city: str
     country: str
-    latitude: Optional[str] = None
-    longitude: Optional[str] = None
+    latitude: Optional[str] = Field(default=None, max_length=40)
+    longitude: Optional[str] = Field(default=None, max_length=40)
     theme: str = "terracotta"
-    span: int = 20000
-    width: float = 12.0
-    height: float = 16.0
-    format: str = "png"
+    span: int = Field(default=20000, ge=500, le=MAX_SPAN_M)
+    width: float = Field(default=12.0, ge=2, le=40, allow_inf_nan=False)
+    height: float = Field(default=16.0, ge=2, le=40, allow_inf_nan=False)
+    format: Literal["png", "svg", "pdf"] = "png"
     no_title: bool = False
     no_coords: bool = False
     gradient_tb: bool = False
     gradient_lr: bool = False
-    text_position: str = "bottom"
+    text_position: Literal["bottom", "top", "center"] = "bottom"
     country_label: Optional[str] = None
     display_city: Optional[str] = None
     display_country: Optional[str] = None
@@ -108,120 +59,307 @@ class GenerateRequest(BaseModel):
     show_contours: bool = False
     show_heart: bool = False
 
+    @field_validator("city", "country", "display_city", "display_country", "country_label")
+    @classmethod
+    def validate_label(cls, value, info):
+        if value is None:
+            return value
+        if any(unicodedata.category(char) == "Cc" for char in value):
+            raise ValueError("Control characters are not allowed")
+        value = value.strip()
+        if not value and info.field_name in {"display_city", "display_country", "country_label"}:
+            return None
+        if len(value) > 80 or (not value and info.field_name != "country"):
+            raise ValueError("Labels must contain 1 to 80 characters")
+        return value
+
+    @field_validator("theme")
+    @classmethod
+    def validate_theme(cls, value):
+        if value not in renderer.get_available_themes():
+            raise ValueError("Unknown theme")
+        return value
+
+    @field_validator("latitude", "longitude")
+    @classmethod
+    def validate_coordinate(cls, value, info):
+        if value is not None:
+            limit = 85 if info.field_name == "latitude" else 180
+            try:
+                number = parse(value)
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise ValueError("Invalid coordinate") from exc
+            if not math.isfinite(number) or not -limit <= number <= limit:
+                raise ValueError("Coordinate is out of range")
+        return value
+
+    @model_validator(mode="after")
+    def validate_location(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("Provide both latitude and longitude")
+        if not self.country and self.latitude is None:
+            raise ValueError("Country is required without coordinates")
+        return self
+
+
+@dataclass(eq=False)
+class Job:
+    id: str
+    req: GenerateRequest
+    events: asyncio.Queue = field(default_factory=asyncio.Queue)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    position: Optional[int] = None
+
+
+jobs: dict[str, Job] = {}
+pending: list[Job] = []
+running_job: Optional[Job] = None
+tasks: set[asyncio.Task] = set()
+executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="map-renderer")
+
+
+def keep_task(coro):
+    task = asyncio.create_task(coro)
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    return task
+
+
+def update_positions():
+    for position, job in enumerate(pending, 1):
+        if job.position != position:
+            job.position = position
+            job.events.put_nowait({"type": "progress", "percent": 1, "message": f"Waiting in queue (position {position})..."})
+
+
+def start_job(job):
+    global running_job
+    running_job = job
+    keep_task(run_generation_task(job))
+
+
+def enqueue_job(req):
+    if running_job is not None and len(pending) >= MAX_QUEUED:
+        raise HTTPException(status_code=503, detail=BUSY_MESSAGE, headers={"Retry-After": "60"})
+    job = Job(uuid4().hex, req)
+    jobs[job.id] = job
+    if running_job is None:
+        start_job(job)
+    else:
+        pending.append(job)
+        update_positions()
+    return job
+
+
+def cancel_job(job):
+    job.cancel_event.set()
+    if job in pending:
+        pending.remove(job)
+        jobs.pop(job.id, None)
+        update_positions()
+
+
+def error_message(exc, task_id):
+    if isinstance(exc, renderer.MapDataUnavailable):
+        return "The map data server is busy right now. Please try again in a few minutes."
+    if isinstance(exc, renderer.CityNotFound):
+        return "Could not find this city. Check the spelling or enter coordinates."
+    if isinstance(exc, renderer.NoMapData):
+        return "There are no roads in this area. Try a larger area or another place."
+    return f"Generation failed. Reference: {task_id[:8]}"
+
+
+async def run_generation_task(job):
+    global running_job
+    loop = asyncio.get_running_loop()
+
+    def deliver(message, progress):
+        if not job.cancel_event.is_set():
+            job.events.put_nowait({"type": "progress", "percent": progress, "message": message})
+
+    def callback(message, progress=None):
+        loop.call_soon_threadsafe(deliver, message, progress)
+
+    def render():
+        if job.cancel_event.is_set():
+            raise renderer.GenerationCancelled()
+        kwargs = job.req.model_dump()
+        kwargs["output_format"] = kwargs.pop("format")
+        return renderer.run_generator(**kwargs, font_family=None, callback=callback, cancel_check=job.cancel_event.is_set)
+
+    worker = None
+    try:
+        logger.info("Starting generation %s", job.id)
+        worker = loop.run_in_executor(executor, render)
+        done, _ = await asyncio.wait({worker}, timeout=JOB_TIMEOUT_SECONDS)
+        if not done:
+            job.cancel_event.set()
+            job.events.put_nowait({"type": "error", "message": TIMEOUT_MESSAGE})
+        result = await asyncio.shield(worker)
+        if not job.cancel_event.is_set():
+            filename = Path(result).name
+            job.events.put_nowait({"type": "done", "url": f"/api/posters/{quote(filename, safe='')}"})
+    except renderer.GenerationCancelled:
+        pass
+    except asyncio.CancelledError:
+        job.cancel_event.set()
+        # A cancelled asyncio future must never release the renderer's thread slot.
+        if worker is not None:
+            while not worker.done():
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            try:
+                worker.result()
+            except renderer.GenerationCancelled:
+                pass
+            except Exception:
+                logger.exception("Cancelled generation %s failed", job.id)
+        raise
+    except Exception as exc:
+        logger.exception("Generation %s failed", job.id)
+        if not job.cancel_event.is_set():
+            job.events.put_nowait({"type": "error", "message": error_message(exc, job.id)})
+    finally:
+        job.events.put_nowait({"type": "cancelled"})
+        jobs.pop(job.id, None)
+        running_job = None
+        if pending:
+            start_job(pending.pop(0))
+            update_positions()
+
+
+def cleanup_files():
+    for directory in (POSTERS_DIR, Path(renderer.CACHE_DIR)):
+        all_files = []
+        cutoff = time.time() - MAX_AGE_DAYS * 86400
+        for root, directories, filenames in os.walk(directory):
+            directories[:] = [name for name in directories if not name.startswith(".")]
+            for name in filenames:
+                if name.startswith("."):
+                    continue
+                path = Path(root) / name
+                try:
+                    if not path.is_file():
+                        continue
+                    stat = path.stat()
+                    if MAX_AGE_DAYS > 0 and stat.st_mtime < cutoff:
+                        path.unlink()
+                    else:
+                        all_files.append((stat.st_mtime, path, stat.st_size))
+                except OSError:
+                    logger.warning("Could not clean file %r", str(path), exc_info=True)
+        total = sum(size for _, _, size in all_files)
+        if MAX_SIZE_MB > 0:
+            for _, path, size in sorted(all_files):
+                if total <= MAX_SIZE_MB * 1024 * 1024:
+                    break
+                try:
+                    path.unlink()
+                    total -= size
+                except OSError:
+                    logger.warning("Could not clean file %r", str(path), exc_info=True)
+
+
+async def cleanup_loop():
+    while True:
+        try:
+            await asyncio.to_thread(cleanup_files)
+        except Exception:
+            logger.exception("Automatic cleanup failed")
+        await asyncio.sleep(CLEANUP_INTERVAL_HOURS * 3600)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    cleanup = keep_task(cleanup_loop())
+    yield
+    cleanup.cancel()
+    for job in list(jobs.values()):
+        cancel_job(job)
+    await asyncio.gather(*list(tasks), return_exceptions=True)
+
+
+app = FastAPI(title="AesthetiMap API", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+
 @app.get("/api/themes")
 def get_themes():
     themes = []
-    for f in glob.glob("themes/*.json"):
+    for filename in glob.glob(os.path.join(renderer.THEMES_DIR, "*.json")):
         try:
-            with open(f, 'r', encoding='utf-8') as jf:
-                data = json.load(jf)
-                theme_id = Path(f).stem
-                themes.append({
-                    "id": theme_id,
-                    "name": data.get("name", theme_id.replace('_', ' ').title()),
-                    "description": data.get("description", "")
-                })
-        except Exception as e:
-            print(f"Error loading theme {f}: {e}")
-            
-    return {"themes": sorted(themes, key=lambda x: x["name"])}
+            with open(filename, encoding="utf-8") as source:
+                data = json.load(source)
+            theme_id = Path(filename).stem
+            themes.append({"id": theme_id, "name": data.get("name", theme_id.replace("_", " ").title()),
+                           "description": data.get("description", "")})
+        except Exception:
+            logger.exception("Error loading theme %r", filename)
+    return {"themes": sorted(themes, key=lambda theme: theme["name"])}
+
 
 @app.get("/api/status")
 async def get_status():
-    return {
-        "pid": os.getpid(),
-        "active_tasks": len(task_events)
-    }
+    return {"status": "ok", "running": int(running_job is not None), "queued": len(pending)}
 
-async def run_generation_task(task_id: str, req: GenerateRequest, event_queue: asyncio.Queue):
-    """Actual worker task that runs in the background of the same process."""
-    print(f"🛠️ [PID {os.getpid()}] Starting task {task_id} for {req.city}...")
-    loop = asyncio.get_event_loop()
-    
-    try:
-        def callback(message: str, progress: Optional[int] = None):
-            data = {"type": "progress", "percent": progress, "message": message}
-            loop.call_soon_threadsafe(lambda: event_queue.put_nowait(data))
 
-        # Run the heavy rendering in a thread
-        result_file = await loop.run_in_executor(
-            None,
-            lambda: renderer.run_generator(
-                city=req.city,
-                country=req.country,
-                theme=req.theme,
-                span=req.span,
-                width=req.width,
-                height=req.height,
-                output_format=req.format,
-                latitude=req.latitude,
-                longitude=req.longitude,
-                no_title=req.no_title,
-                no_coords=req.no_coords,
-                gradient_tb=req.gradient_tb,
-                gradient_lr=req.gradient_lr,
-                text_position=req.text_position,
-                country_label=req.country_label,
-                display_city=req.display_city,
-                display_country=req.display_country,
-                font_family=None,
-                show_buildings=req.show_buildings,
-                show_contours=req.show_contours,
-                show_heart=req.show_heart,
-                callback=callback
-            )
-        )
-        
-        filename = Path(result_file).name
-        await event_queue.put({"type": "done", "url": f"/api/posters/{filename}"})
-        print(f"✅ [PID {os.getpid()}] Task {task_id} finished.")
+class JobStreamingResponse(StreamingResponse):
+    def __init__(self, job, *args, **kwargs):
+        self.job = job
+        super().__init__(*args, **kwargs)
 
-    except Exception as e:
-        print(f"❌ [PID {os.getpid()}] Task {task_id} failed: {e}")
-        traceback.print_exc()
-        await event_queue.put({"type": "error", "message": str(e)})
-    finally:
-        # We keep the events for a bit so the stream can finish reading
-        await asyncio.sleep(10)
-        if task_id in task_events:
-            del task_events[task_id]
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            cancel_job(self.job)
+
 
 @app.post("/api/generate_map_stream")
 async def generate_map_stream(req: GenerateRequest):
-    task_id = f"task_{int(time.time() * 1000)}"
-    event_queue = asyncio.Queue()
-    task_events[task_id] = event_queue
-    
-    # Start the task IMMEDIATELY in the same process
-    asyncio.create_task(run_generation_task(task_id, req, event_queue))
-    print(f"➕ [PID {os.getpid()}] Task {task_id} started directly.")
-    
+    job = enqueue_job(req)
+
     async def iter_output():
-        # Inform the user
-        yield json.dumps({"type": "progress", "percent": 1, "message": "Starting generation..."}) + "\n"
-        
-        while True:
-            try:
+        try:
+            while True:
                 try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=15)
-                    yield json.dumps(event) + "\n"
-                    if event["type"] in ["done", "error"]:
-                        break
+                    event = await asyncio.wait_for(job.events.get(), timeout=15)
                 except asyncio.TimeoutError:
                     yield json.dumps({"type": "ping"}) + "\n"
                     continue
-            except Exception as e:
-                yield json.dumps({"type": "error", "message": str(e)}) + "\n"
-                break
-                
-    return StreamingResponse(iter_output(), media_type="application/x-ndjson")
+                if event["type"] == "cancelled":
+                    break
+                yield json.dumps(event) + "\n"
+                if event["type"] in {"done", "error"}:
+                    break
+        finally:
+            cancel_job(job)
+
+    return JobStreamingResponse(job, iter_output(), media_type="application/x-ndjson",
+                                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"})
+
 
 @app.get("/api/posters/{filename}")
 def get_poster(filename: str):
-    path = os.path.join("posters", filename)
-    if os.path.exists(path):
-        return FileResponse(path)
-    raise HTTPException(status_code=404, detail="Poster not found")
+    if (not filename or filename.startswith(".") or "/" in filename or "\\" in filename
+            or Path(filename).suffix not in {".png", ".svg", ".pdf"}):
+        raise HTTPException(status_code=404, detail="Poster not found")
+    try:
+        root = Path(POSTERS_DIR).resolve()
+        path = (root / filename).resolve()
+        valid = path.is_relative_to(root) and path.is_file()
+    except (OSError, ValueError, RuntimeError):
+        valid = False
+    if not valid:
+        raise HTTPException(status_code=404, detail="Poster not found")
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if path.suffix == ".svg":
+        headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'"
+    return FileResponse(path, headers=headers)
+
 
 if __name__ == "__main__":
     import uvicorn
