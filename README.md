@@ -47,8 +47,7 @@ Set these environment variables on the backend service in the compose file:
 | `MAX_QUEUED` | `5` | Maximum queued generation jobs. |
 | `JOB_TIMEOUT_SECONDS` | `600` | Generation job timeout in seconds. |
 | `STUCK_GRACE_SECONDS` | `300` | Extra time after a timeout before a stuck process exits and Docker restarts it. |
-| `OVERPASS_URLS` | `https://overpass-api.de/api,https://overpass.private.coffee/api` | Comma-separated Overpass endpoint URLs. |
-| `OSM_REQUEST_TIMEOUT` | `60` | OpenStreetMap request timeout in seconds. |
+| `TILES_URL` | `https://tiles.openfreemap.org/planet` | OpenMapTiles-schema TileJSON endpoint. |
 | `HTTP_USER_AGENT` | `map-poster-service/1.0` | Identifying User-Agent sent to map services. |
 
 ## Checks
@@ -66,4 +65,12 @@ npm run build
 
 AesthetiMap is based on [maptoposter by Ankur Gupta](https://github.com/originalankur/maptoposter), with application development by Denys Rastiegaiev. The software is distributed under the [MIT License](LICENSE).
 
-Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). Keep the appropriate map attribution when sharing generated posters.
+Map data © [OpenMapTiles](https://www.openmaptiles.org/) © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). Keep the appropriate map attribution when sharing generated posters.
+
+## Vector tile data
+
+Map geometry comes from OpenMapTiles-schema vector tiles, supplied by [OpenFreeMap](https://openfreemap.org) by default. TileJSON is cached for one hour, with a stale fallback during provider outages. Tiles and geocoder JSON results are cached on disk.
+
+Provider terms are hard limits: at most four concurrent requests, 1,000 tile requests and 45 MB per user job. The renderer targets at most 200 tiles and lowers zoom if a tile set exceeds 35 MB. Individual tiles are limited to 8 MB. Requests occur only during user jobs; there is no prefetching or background refresh.
+
+For self-hosting, set `TILES_URL` to any TileJSON server using the OpenMapTiles schema, for example `go-pmtiles serve`. HTTPS tile templates are required unless the TileJSON endpoint itself uses HTTP. Preserve the generated attribution: “© OpenMapTiles © OpenStreetMap contributors · aesthetimap.rastiegaiev.com”.

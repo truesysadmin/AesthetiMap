@@ -4,7 +4,7 @@
 
 AesthetiMap is a full-stack application for generating artistic map posters using OpenStreetMap data.
 
-- **`renderer.py`**: Core rendering engine. Uses `osmnx` for data retrieval and `matplotlib` for generating posters. Supports multiple themes and high-resolution exports.
+- **`renderer.py`**: Core rendering engine. Uses OpenMapTiles vector tiles for data retrieval and `matplotlib` for generating posters. Supports multiple themes and high-resolution exports.
 - **`backend/`**: FastAPI service that wraps `renderer.py` into a web API. Handles asynchronous generation tasks, file cleanup, and static asset serving.
 - **`frontend/`**: Vite-powered single-page application. Provides a visual interface for configuring map parameters (city, theme, layout) and previewing results.
 - **`themes/`**: JSON configuration files defining color palettes and styling rules for the renderer.
@@ -53,7 +53,7 @@ cd frontend && npm ci && npm run build
 ### Python
 - Use **FastAPI** for API endpoints.
 - Core logic should reside in `renderer.py` to maintain CLI compatibility.
-- Follow existing patterns for theme application and data fetching via `osmnx`.
+- Follow existing patterns for theme application and data fetching via OpenMapTiles vector tiles.
 
 ### JavaScript
 - Lightweight **Vite** setup with vanilla JS.

@@ -2,11 +2,10 @@ from pathlib import Path
 from unittest.mock import Mock
 import sys
 
-import geopandas as gpd
 import matplotlib.pyplot as plt
-import networkx as nx
 import pytest
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString
+import tiles
 
 import renderer
 
@@ -39,22 +38,6 @@ def test_filename_rejects_theme_traversal():
         renderer.generate_output_filename("Kyiv", "../terracotta", "png")
 
 
-def test_split_layers_matches_values():
-    frame = gpd.GeoDataFrame({
-        "natural": ["water", "bay", "strait", "wood", None, None, None, None, None, None],
-        "waterway": [None, None, None, None, "riverbank", "stream", None, None, None, None],
-        "leisure": [None] * 6 + ["park", "pitch", None, None],
-        "landuse": [None] * 8 + ["grass", "industrial"],
-        "building": [None] * 9 + ["yes"],
-        "geometry": [Point(0, 0)] * 10,
-    }, crs="EPSG:4326")
-    water, parks, buildings = renderer.split_layers(frame, True)
-    assert list(water.index) == [0, 1, 2, 4]
-    assert list(parks.index) == [6, 8]
-    assert list(buildings.index) == [9]
-    assert renderer.split_layers(frame, False)[2].empty
-
-
 def test_cache_atomic_and_corrupt(monkeypatch):
     real_replace = renderer.os.replace
     replacements = []
@@ -70,7 +53,7 @@ def test_cache_atomic_and_corrupt(monkeypatch):
     assert renderer.cache_get("test") == {"value": 3}
     assert replacements
     path = Path(renderer._cache_path("test"))
-    path.write_bytes(b"broken pickle")
+    path.write_bytes(b"broken JSON")
     assert renderer.cache_get("test") is None
     assert not path.exists()
 
@@ -87,77 +70,11 @@ def test_cache_failed_write_removes_temp(monkeypatch):
     assert list(Path(renderer.CACHE_DIR).iterdir()) == []
 
 
-def test_graph_endpoint_fallback(monkeypatch):
-    original = renderer.ox.settings.overpass_url
-    attempts = []
-    sentinel = synthetic_graph()
-
-    def download(*args, **kwargs):
-        attempts.append(renderer.ox.settings.overpass_url)
-        if len(attempts) == 1:
-            raise RuntimeError("first endpoint unavailable")
-        return sentinel
-
-    monkeypatch.setattr(renderer.ox, "graph_from_bbox", download)
-    assert renderer.fetch_graph((0, 0, 1, 1)) is sentinel
-    assert len(attempts) == 2
-    assert attempts[0] != attempts[1]
-    assert renderer.ox.settings.overpass_url == original
-
-
-def test_overpass_busy_is_bounded_and_restored(monkeypatch):
-    from osmnx import _overpass
-
-    original_time = _overpass.time
-    original_url = renderer.ox.settings.overpass_url
-    attempts = []
-
-    def busy(*args, **kwargs):
-        attempts.append(renderer.ox.settings.overpass_url)
-        _overpass.time.sleep(55)
-        pytest.fail("the busy shim did not interrupt the recursive retry")
-
-    monkeypatch.setattr(renderer.ox, "graph_from_bbox", busy)
-    monkeypatch.setattr(renderer, "_cancellable_wait", lambda *args: None)
-    with pytest.raises(renderer.MapDataUnavailable):
-        renderer.fetch_graph((0, 0, 1, 1))
-    assert len(attempts) == 4
-    assert _overpass.time is original_time
-    assert renderer.ox.settings.overpass_url == original_url
-
-
-def test_insufficient_data_not_retried(monkeypatch):
-    from osmnx._errors import InsufficientResponseError
-
-    download = Mock(side_effect=InsufficientResponseError("no data"))
-    monkeypatch.setattr(renderer.ox, "features_from_bbox", download)
-    assert renderer.fetch_features((0, 0, 1, 1), {"natural": "water"}, "water").empty
-    assert download.call_count == 1
-    assert not list(renderer.CACHE_DIR.iterdir())
-    monkeypatch.setattr(renderer.ox, "graph_from_bbox", download)
-    with pytest.raises(renderer.NoMapData):
-        renderer.fetch_graph((0, 0, 1, 1))
-    assert download.call_count == 2
-
-
-def test_cancel_propagates(monkeypatch):
-    monkeypatch.setattr(renderer.ox, "graph_from_bbox", Mock(side_effect=renderer.GenerationCancelled()))
-    with pytest.raises(renderer.GenerationCancelled):
-        renderer.fetch_graph((0, 0, 1, 1))
-
-
-def synthetic_graph():
-    graph = nx.MultiDiGraph(crs="EPSG:4326")
-    graph.add_node(1, x=-34.001, y=-12.001)
-    graph.add_node(2, x=-33.999, y=-11.999)
-    graph.add_edge(1, 2, length=310, highway="residential", geometry=LineString([(-34.001, -12.001), (-33.999, -11.999)]))
-    return graph
-
-
 @pytest.fixture
 def fake_map(monkeypatch):
-    monkeypatch.setattr(renderer, "fetch_graph", lambda *a, **kw: synthetic_graph())
-    monkeypatch.setattr(renderer, "fetch_features", lambda *a, **kw: gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"))
+    layers = tiles.MapLayers()
+    layers.roads["residential"].append(LineString([(-100, -100), (100, 100)]))
+    monkeypatch.setattr(tiles, "load_layers", lambda *a, **kw: layers)
     return renderer.load_theme("terracotta")
 
 
@@ -175,16 +92,16 @@ def test_real_small_render_texts(tmp_path, monkeypatch, fake_map):
     renderer.create_poster("Test", "Country", (-12, -34), 1000, str(output), "svg", theme=fake_map, width=2, height=2)
     assert output.stat().st_size > 0
     assert any(renderer.format_coordinates(-12, -34) == text for text, _ in texts)
-    assert any(text == "© OpenStreetMap contributors · aesthetimap.rastiegaiev.com" and kwargs["alpha"] == 0.7 for text, kwargs in texts)
+    assert any(text == "© OpenMapTiles © OpenStreetMap contributors · aesthetimap.rastiegaiev.com" and kwargs["alpha"] == 0.7 for text, kwargs in texts)
     assert not plt.get_fignums()
 
 
 def test_figure_closed_on_exception(monkeypatch, tmp_path, fake_map):
     def fail(*args, **kwargs):
-        raise RuntimeError("projection failed")
+        raise RuntimeError("drawing failed")
 
-    monkeypatch.setattr(renderer.ox, "project_graph", fail)
-    with pytest.raises(RuntimeError, match="projection failed"):
+    monkeypatch.setattr(renderer, "draw_polygons", fail)
+    with pytest.raises(RuntimeError, match="drawing failed"):
         renderer.create_poster("Test", "Country", (-12, -34), 1000, str(tmp_path / "failed.svg"), "svg", theme=fake_map)
     assert not plt.get_fignums()
 
@@ -218,16 +135,6 @@ def test_geocoding_errors(monkeypatch, exception, expected):
         renderer.get_coordinates("Kyiv", "Ukraine")
 
 
-def test_feature_cache_key_depends_on_sorted_tags(monkeypatch):
-    download = Mock(return_value=gpd.GeoDataFrame())
-    monkeypatch.setattr(renderer.ox, "features_from_bbox", download)
-    renderer.fetch_features((0, 0, 1, 1), {"natural": "water", "leisure": "park"}, "combined")
-    renderer.fetch_features((0, 0, 1, 1), {"leisure": "park", "natural": "water"}, "combined")
-    assert download.call_count == 1
-    renderer.fetch_features((0, 0, 1, 1), {"natural": "water"}, "combined")
-    assert download.call_count == 2
-
-
 def test_geocoder_cache_case_normalized_and_hashed(monkeypatch):
     locator = Mock()
     locator.geocode.return_value.latitude = 50
@@ -238,3 +145,21 @@ def test_geocoder_cache_case_normalized_and_hashed(monkeypatch):
     assert renderer.get_coordinates("KYIV", "UKRAINE") == (50, 30)
     assert locator.geocode.call_count == 1
     assert all("kyiv" not in path.name.lower() for path in Path(renderer.CACHE_DIR).iterdir())
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_partial_output_removed(monkeypatch, tmp_path, fake_map, cancelled):
+    from matplotlib.figure import Figure
+    output = tmp_path / "partial.png"
+
+    def save(*args, **kwargs):
+        output.write_bytes(b"partial")
+        if not cancelled:
+            raise OSError("disk full")
+
+    monkeypatch.setattr(Figure, "savefig", save)
+    with pytest.raises(renderer.GenerationCancelled if cancelled else OSError):
+        renderer.create_poster("Test", "Country", (0, 0), 1000, str(output), "png", theme=fake_map,
+                               cancel_check=lambda: output.exists() if cancelled else False)
+    assert not output.exists()
+    assert not plt.get_fignums()
