@@ -573,8 +573,10 @@ def create_poster(
             y_city, y_sep, y_country, y_coords = 0.14, 0.125, 0.10, 0.07
 
         if not no_title:
-            ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_main_adjusted, zorder=11)
-            ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_sub, zorder=11)
+            ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=theme["text"],
+                    ha="center", fontproperties=font_main_adjusted, zorder=11, parse_math=False)
+            ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=theme["text"],
+                    ha="center", fontproperties=font_sub, zorder=11, parse_math=False)
             ax.plot([0.4, 0.6], [y_sep, y_sep], transform=ax.transAxes, color=theme["text"], linewidth=1 * scale_factor, zorder=11)
 
         if not no_coords:

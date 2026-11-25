@@ -170,3 +170,15 @@ def test_renderer_uses_vector_legacy_heart_and_no_glyph(tmp_path, monkeypatch):
     assert draw.call_args.args[1][0]["type"] == "heart"
     assert "♥" not in Path(renderer.__file__).read_text(encoding="utf-8")
     assert output.is_file()
+
+
+@pytest.mark.parametrize("label", [r"$\bad$", "$HOME$", "Price $5 and $6"])
+def test_label_is_literal_text(label):
+    fig, ax = canvas()
+    try:
+        artists = markers.draw_markers(ax, [mark(label=label)], False, THEME, CROP, lambda x, y: (x, y), 1)
+        fig.canvas.draw()
+        assert artists[-1].get_text() == label
+        assert not artists[-1].get_parse_math()
+    finally:
+        plt.close(fig)

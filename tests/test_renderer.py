@@ -96,6 +96,12 @@ def test_real_small_render_texts(tmp_path, monkeypatch, fake_map):
     assert not plt.get_fignums()
 
 
+def test_titles_are_literal_text(tmp_path, fake_map):
+    output = tmp_path / "poster.png"
+    renderer.create_poster(r"$\bad$", r"$\frac$", (1, 2), 1000, str(output), "png", theme=fake_map, width=2, height=2)
+    assert output.stat().st_size > 0
+
+
 def test_figure_closed_on_exception(monkeypatch, tmp_path, fake_map):
     def fail(*args, **kwargs):
         raise RuntimeError("drawing failed")

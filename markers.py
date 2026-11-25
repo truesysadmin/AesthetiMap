@@ -117,7 +117,7 @@ def draw_markers(ax, markers, connect, theme, crop, project, scale_factor):
             baseline = -(bottom + (4 + 0.75 * LABEL_SIZE) * scale_factor)
             label_transform = (Affine2D().scale(1 / 72) + ax.figure.dpi_scale_trans
                                + ScaledTranslation(x, y, ax.transData))
-            text = ax.text(0, baseline, label, transform=label_transform, ha="center", va="baseline",
+            text = ax.text(0, baseline, label, transform=label_transform, ha="center", va="baseline", parse_math=False,
                            fontproperties=FontProperties(fname=str(_ROBOTO), size=LABEL_SIZE * scale_factor),
                            color=color, alpha=1, zorder=101, clip_on=True,
                            path_effects=[patheffects.withStroke(linewidth=3 * scale_factor, foreground=theme["bg"])])
