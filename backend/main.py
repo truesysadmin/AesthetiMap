@@ -20,11 +20,12 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from lat_lon_parser import parse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import renderer  # noqa: E402
 import tiles  # noqa: E402
+from markers import SHAPES  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aesthetimap")
@@ -42,6 +43,50 @@ THEME_COLOR_KEYS = frozenset({
     "bg", "text", "gradient_color", "water", "parks", "building", "road_motorway", "road_primary",
     "road_secondary", "road_tertiary", "road_residential", "road_default",
 })
+
+
+class Marker(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: str
+    lat: Optional[float] = Field(default=None, ge=-85, le=85, allow_inf_nan=False)
+    lon: Optional[float] = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+    size: float = Field(default=72, ge=12, le=500, allow_inf_nan=False)
+    opacity: float = Field(default=1, ge=0.15, le=1, allow_inf_nan=False)
+    color: str = "text"
+    label: Optional[str] = None
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, value):
+        if value not in SHAPES:
+            raise ValueError("Unknown marker shape")
+        return value
+
+    @field_validator("color")
+    @classmethod
+    def validate_color(cls, value):
+        if value not in {"text", "road_motorway", "water"} and not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+            raise ValueError("Invalid marker color")
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value):
+        if value is None:
+            return None
+        if any(unicodedata.category(char) == "Cc" for char in value):
+            raise ValueError("Control characters are not allowed")
+        value = value.strip()
+        if len(value) > 40:
+            raise ValueError("Marker labels must contain at most 40 characters")
+        return value
+
+    @model_validator(mode="after")
+    def validate_location(self):
+        if (self.lat is None) != (self.lon is None):
+            raise ValueError("Provide both marker latitude and longitude")
+        return self
 
 
 class GenerateRequest(BaseModel):
@@ -65,6 +110,8 @@ class GenerateRequest(BaseModel):
     show_buildings: bool = False
     show_contours: bool = False
     show_heart: bool = False
+    markers: list[Marker] = Field(default_factory=list, max_length=5)
+    connect: bool = False
 
     @field_validator("city", "country", "display_city", "display_country", "country_label")
     @classmethod

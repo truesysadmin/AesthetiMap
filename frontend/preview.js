@@ -2,6 +2,7 @@ import { Map as LibreMap, setWorkerUrl } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { detailFactor, zoomForSpan, spanForZoom, framedSheetSize, strokePx, scaleRatio, niceScaleBar, titleText, titleSize, formatCoordinates } from './preview-math.js';
+import { LABEL_SIZE, LINE_WIDTH, shapes, resolveColor, labelOffset, estimatePosition } from './markers.js';
 import { buildStyle } from './map-style.js';
 import '@fontsource/roboto/latin-300.css';
 import '@fontsource/roboto/latin-400.css';
@@ -25,7 +26,7 @@ export function svgNode(tag, attrs = {}, text) {
   return node;
 }
 
-export function createPreview({ initial, config, onMapChange }) {
+export function createPreview({ initial, config, onMapChange, onMarkersChange, onSelectMarker, onOutsideMarkers }) {
   setWorkerUrl(workerUrl);
   let state = initial;
   let map;
@@ -35,6 +36,10 @@ export function createPreview({ initial, config, onMapChange }) {
   let failed = false;
   let metadataLoaded = false;
   let generating = false;
+  let result = false;
+  let selected = -1;
+  let marksGroup;
+  let drag;
   // The map is drawn K times larger and scaled down, so that a small sheet still loads detailed tiles.
   let K = 3;
   let styleKey;
@@ -100,8 +105,112 @@ export function createPreview({ initial, config, onMapChange }) {
     }
     text('© OpenMapTiles © OpenStreetMap contributors · aesthetimap.rastiegaiev.com', W * 0.98, H * 0.98,
       8 * scale, 300, { 'text-anchor': 'end', opacity: 0.7 });
-    if (state.show_heart) text('♥', W / 2, H / 2, 50 * scale, 400, { fill: '#FF2A2A', 'dominant-baseline': 'central' });
+    marksGroup = svgNode('g', { 'data-marks': '' });
+    overlay.append(marksGroup);
+    drawMarks();
   }
+
+  function markerPosition(marker) {
+    if (marker.lat == null) return { x: state.width * 36, y: state.height * 36 };
+    if (map && !failed && size.width) {
+      const point = map.project([marker.lon, marker.lat]);
+      return { x: point.x / K / size.width * state.width * 72, y: point.y / K / size.height * state.height * 72 };
+    }
+    return estimatePosition(marker, state);
+  }
+
+  function drawMarks() {
+    if (!marksGroup) return;
+    const W = state.width * 72, H = state.height * 72, scale = Math.min(state.width, state.height) / 12;
+    const markers = state.markers || [], positions = markers.map(markerPosition);
+    const outside = positions.map(point => point.x < 0 || point.y < 0 || point.x > W || point.y > H);
+    marksGroup.replaceChildren();
+    const labels = svgNode('g', { 'pointer-events': 'none' });
+    if (state.connect && markers.length >= 2) {
+      marksGroup.append(svgNode('path', { d: positions.map((point, index) => `${index ? 'L' : 'M'}${point.x} ${point.y}`).join(' '),
+        fill: 'none', stroke: state.colors.text, opacity: 0.75, 'stroke-width': LINE_WIDTH * scale,
+        'stroke-linecap': 'round', 'stroke-dasharray': `${0.01 * LINE_WIDTH * scale} ${2.6 * LINE_WIDTH * scale}` }));
+    }
+    markers.forEach((marker, index) => {
+      if (outside[index]) return;
+      const shape = shapes[marker.type], point = positions[index], color = resolveColor(marker.color, state.colors);
+      // A large unselected mark would block dragging the map; it is picked in the panel.
+      const interactive = !generating && !result && (marker.size <= 160 || selected === index);
+      const group = svgNode('g', { transform: `translate(${point.x} ${point.y})`, 'data-marker': index,
+        class: `${interactive ? 'mark-interactive' : ''}${selected === index && interactive ? ' mark-selected' : ''}`,
+        ...(interactive ? { tabindex: 0, role: 'button', 'aria-label': `${shape.name} mark${marker.label ? `, ${marker.label}` : ''}` } : {}) });
+      const factor = marker.size * scale / 100;
+      const pathAttrs = { d: shape.d, transform: `scale(${factor}) translate(${-shape.anchor[0]} ${-shape.anchor[1]})`, fill: color, opacity: marker.opacity };
+      if (marker.opacity >= 0.6 && marker.size <= 160) group.append(svgNode('path', { ...pathAttrs, fill: 'none', stroke: state.colors.bg,
+        'stroke-width': 0.07 * marker.size * scale / factor, 'stroke-linejoin': 'round' }));
+      group.append(svgNode('path', pathAttrs));
+      if (marker.label) labels.append(svgNode('text', { x: point.x, y: point.y + labelOffset(shape, marker.size, scale),
+        fill: color, 'font-family': 'Roboto', 'font-size': LABEL_SIZE * scale, 'font-weight': 400, 'text-anchor': 'middle',
+        stroke: state.colors.bg, 'stroke-width': 3 * scale, 'stroke-linejoin': 'round', 'paint-order': 'stroke fill' }, marker.label));
+      if (interactive) {
+        const least = 32 * W / Math.max(size.width, 1), hit = Math.max(least, marker.size * scale);
+        // The hit box includes the whole shape and remains at least 32 screen pixels.
+        const hitX = -shape.anchor[0] * factor - Math.max(0, hit - marker.size * scale) / 2;
+        const hitY = -shape.anchor[1] * factor - Math.max(0, hit - marker.size * scale) / 2;
+        group.append(svgNode('rect', { x: hitX, y: hitY, width: hit, height: hit, fill: 'transparent' }),
+          svgNode('rect', { x: hitX - 3, y: hitY - 3, width: hit + 6, height: hit + 6, rx: 4, class: 'mark-focus' }));
+      }
+      marksGroup.append(group);
+    });
+    marksGroup.append(labels);
+    onOutsideMarkers?.(outside);
+  }
+
+  function editMarker(index, changes) {
+    state = { ...state, markers: state.markers.map((marker, i) => i === index ? { ...marker, ...changes } : marker) };
+    drawMarks(); onMarkersChange?.(state.markers);
+  }
+  overlay.addEventListener('pointerdown', event => {
+    const target = event.target.closest('[data-marker]');
+    if (!target || generating || result) return;
+    const index = Number(target.dataset.marker);
+    selected = index; onSelectMarker?.(index);
+    if (!map || failed) return;
+    event.preventDefault(); event.stopPropagation();
+    const point = markerPosition(state.markers[index]), rect = sheet.getBoundingClientRect();
+    drag = { index, pointerId: event.pointerId, panEnabled: map.dragPan.isEnabled(),
+      offsetX: point.x / (state.width * 72) * rect.width - (event.clientX - rect.left),
+      offsetY: point.y / (state.height * 72) * rect.height - (event.clientY - rect.top) };
+    map.dragPan.disable(); overlay.setPointerCapture(event.pointerId);
+  });
+  overlay.addEventListener('pointermove', event => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    event.preventDefault(); event.stopPropagation();
+    const rect = sheet.getBoundingClientRect();
+    const place = map.unproject([(event.clientX - rect.left + drag.offsetX) * K, (event.clientY - rect.top + drag.offsetY) * K]).wrap();
+    editMarker(drag.index, { lat: Number(Math.max(-85, Math.min(85, place.lat)).toFixed(5)), lon: Number(place.lng.toFixed(5)) });
+  });
+  function endDrag() {
+    if (!drag) return;
+    if (overlay.hasPointerCapture(drag.pointerId)) overlay.releasePointerCapture(drag.pointerId);
+    if (drag.panEnabled) map.dragPan.enable();
+    const index = drag.index; drag = undefined;
+    marksGroup?.querySelector(`[data-marker="${index}"]`)?.focus();
+  }
+  overlay.addEventListener('pointerup', endDrag);
+  overlay.addEventListener('pointercancel', endDrag);
+  overlay.addEventListener('keydown', event => {
+    const target = event.target.closest('[data-marker]');
+    if (!target || generating || result) return;
+    const index = Number(target.dataset.marker);
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault(); state = { ...state, markers: state.markers.filter((_, i) => i !== index) };
+      onMarkersChange?.(state.markers); drawMarks(); return;
+    }
+    if (['Enter', ' '].includes(event.key)) { event.preventDefault(); selected = index; onSelectMarker?.(index); drawMarks(); marksGroup?.querySelector(`[data-marker="${index}"]`)?.focus(); }
+    const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    if (!moves[event.key]) return;
+    event.preventDefault();
+    const marker = state.markers[index], [x, y] = moves[event.key], lat = marker.lat ?? latitude(), lon = marker.lon ?? state.longitude ?? 30.5234;
+    editMarker(index, { lat: Number(Math.max(-85, Math.min(85, lat + y * state.span * 0.01 / 111320)).toFixed(5)),
+      lon: Number(Math.max(-180, Math.min(180, lon + x * state.span * 0.01 / (111320 * Math.cos(lat * Math.PI / 180)))).toFixed(5)) });
+    marksGroup?.querySelector(`[data-marker="${index}"]`)?.focus();
+  });
 
   function caption() {
     const spanLabel = state.span >= 1000 ? `${state.span / 1000} km` : `${state.span} m`;
@@ -170,6 +279,7 @@ export function createPreview({ initial, config, onMapChange }) {
         // Tile errors carry a tile object. A failed source before metadata is fatal.
         if (event.sourceId === 'map' && !event.tile && !metadataLoaded) { failed = true; note(); }
       });
+      map.on('move', drawMarks);
       map.once('load', () => { styleReady = true; syncMap(); });
       map.once('idle', () => performance.mark('preview-idle'));
       map.on('webglcontextlost', () => { failed = true; note(); });
@@ -238,10 +348,14 @@ export function createPreview({ initial, config, onMapChange }) {
     },
     setGenerating(value) {
       generating = value;
+      if (value) endDrag();
+      drawMarks();
       sheet.classList.toggle('generating', value);
       canvas.inert = value;
       if (value && map) map.stop();
     },
+    setSelected(index) { selected = index; drawMarks(); },
+    setResult(value) { result = value; if (value) endDrag(); drawMarks(); },
     destroy() { observer.disconnect(); window.removeEventListener('resize', resize); map?.remove(); },
   };
 }

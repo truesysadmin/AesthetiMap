@@ -1,7 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.main import GenerateRequest
+from backend.main import GenerateRequest, Marker, app
+from fastapi.testclient import TestClient
 
 
 def request(**updates):
@@ -77,3 +78,55 @@ def test_valid_coordinates_and_empty_country(latitude, longitude):
 ])
 def test_valid_boundaries(span, width, height, format, text_position):
     assert request(span=span, width=width, height=height, format=format, text_position=text_position)
+
+
+def test_marker_defaults_and_plain_dicts():
+    model = request(markers=[{"type": "heart", "label": "  Our home  "}], connect=True)
+    assert model.markers[0] == Marker(type="heart", label="Our home")
+    assert model.model_dump()["markers"] == [{
+        "type": "heart", "lat": None, "lon": None, "size": 72, "opacity": 1,
+        "color": "text", "label": "Our home",
+    }]
+    assert model.connect is True
+    assert request().markers == []
+
+
+@pytest.mark.parametrize("updates", [
+    {"type": "unknown"}, {"type": "../heart"}, {"extra": True},
+    {"lat": 0}, {"lon": 0}, {"lat": 86, "lon": 0}, {"lat": 0, "lon": 181},
+    {"lat": float("nan"), "lon": 0}, {"lat": 0, "lon": float("inf")},
+    {"size": 11.9}, {"size": 500.1}, {"size": float("nan")},
+    {"opacity": 0.149}, {"opacity": 1.01}, {"opacity": float("inf")},
+    {"color": "red"}, {"color": "#fff"}, {"color": "bg"},
+    {"label": "x" * 41}, {"label": "bad\nlabel"}, {"label": "bad\x00label"},
+    {"label": "bad\x7flabel"},
+])
+def test_marker_invalid_fields(updates):
+    with pytest.raises(ValidationError):
+        request(markers=[{"type": "heart", **updates}])
+
+
+@pytest.mark.parametrize("color", ["text", "road_motorway", "water", "#C0392B", "#abcdef"])
+@pytest.mark.parametrize("lat,lon,size,opacity", [(-85, -180, 12, 0.15), (85, 180, 500, 1)])
+def test_marker_boundaries(color, lat, lon, size, opacity):
+    assert Marker(type="pin", lat=lat, lon=lon, size=size, opacity=opacity, color=color)
+
+
+def test_marker_limit_and_legacy_heart():
+    markers = [{"type": "dot"}] * 5
+    model = request(markers=markers, show_heart=True)
+    assert len(model.markers) == 5
+    assert model.show_heart
+    with pytest.raises(ValidationError):
+        request(markers=markers + [{"type": "pin"}])
+
+
+@pytest.mark.parametrize("markers", [
+    [{"type": "heart", "extra": 1}], [{"type": "pin", "lat": 1}],
+    [{"type": "heart", "label": "bad\nlabel"}], [{"type": "dot"}] * 6,
+])
+def test_invalid_marker_api_returns_422(markers):
+    response = TestClient(app).post("/api/generate_map_stream", json={
+        "city": "Kyiv", "country": "Ukraine", "markers": markers,
+    })
+    assert response.status_code == 422

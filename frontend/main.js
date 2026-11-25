@@ -6,16 +6,18 @@ import '@fontsource/instrument-sans/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import { svgNode } from './theme-thumbnail.js';
 import { parseCoordinate } from './preview-math.js';
+import { decodeMarkers, encodeMarkers } from './markers.js';
+import { createMarksPanel } from './marks-panel.js';
 
 const $ = id => document.getElementById(id);
-const flags = ['no_title', 'no_coords', 'gradient_tb', 'gradient_lr', 'show_buildings', 'show_contours', 'show_heart'];
+const flags = ['no_title', 'no_coords', 'gradient_tb', 'gradient_lr', 'show_buildings', 'show_contours'];
 const inputId = key => key.replaceAll('_', '-');
 const posterPathPattern = /^\/api\/posters\/[^/?#\\]+\.(png|svg|pdf)$/;
 const fallbackColors = { bg: '#F5EDE4', text: '#8B4513', gradient_color: '#F5EDE4', water: '#A8C4C4', parks: '#E8E0D0',
   building: '#E5C4B0', road_motorway: '#A0522D', road_primary: '#B8653A', road_secondary: '#C9846A',
   road_tertiary: '#D9A08A', road_residential: '#E5C4B0', road_default: '#D9A08A' };
 const defaults = { city: 'Kyiv', country: 'Ukraine', latitude: 50.4501, longitude: 30.5234, span: 20000,
-  width: 12, height: 16, theme: 'terracotta', format: 'png', text_position: 'bottom',
+  markers: [], connect: false, width: 12, height: 16, theme: 'terracotta', format: 'png', text_position: 'bottom',
   ...Object.fromEntries(flags.map(key => [key, false])) };
 
 async function httpError(response) {
@@ -31,7 +33,10 @@ async function httpError(response) {
 async function init() {
   const params = new URLSearchParams(location.search);
   let state = { ...defaults, colors: fallbackColors };
+  state.markers = decodeMarkers(params.get('markers'), params.get('show_heart'));
+  state.connect = params.get('connect') === 'true';
   let preview;
+  let marksPanel;
   let currentObjectUrl;
   const autocompleteCoordinates = { latitude: !params.size, longitude: !params.size };
   let editingTimer;
@@ -99,6 +104,7 @@ async function init() {
     $('action-bar').classList.add('hidden');
     if (!running) $('preview-status').textContent = '';
     revokePosterUrl();
+    preview?.setResult(false);
   }
   $('edit-btn').addEventListener('click', edit);
 
@@ -108,6 +114,7 @@ async function init() {
   }
   $('result-img').addEventListener('error', expired);
   function showPoster(url, format, filename) {
+    preview?.setResult(true);
     $('sheet').classList.toggle('has-result', format !== 'pdf');
     $('preview-panel').classList.add('has-result-panel');
     $('result-img').classList.toggle('hidden', format === 'pdf');
@@ -197,8 +204,12 @@ async function init() {
     state.text_position = $('text-position').value;
     selectedTheme(); coverageLabel();
   }
-  const update = (fly = false) => { readForm(); preview?.update({ ...state }, { fly }); };
+  const update = (fly = false) => { readForm(); preview?.update({ ...state }, { fly }); marksPanel?.render(); };
+  marksPanel = createMarksPanel({ getState: () => state, onChange(markers, connect) {
+    state = { ...state, markers, connect }; edit(); preview?.update({ ...state });
+  }, onSelect(index) { preview?.setSelected(index); } });
   $('generate-form').addEventListener('input', event => {
+    if (event.target.closest('.marks-group')) return;
     if (event.target.name === 'theme-choice') $('theme').value = event.target.value;
     if (event.target.name === 'format-choice') $('format').value = event.target.value;
     if (event.target.name === 'text-position-choice') $('text-position').value = event.target.value;
@@ -223,7 +234,11 @@ async function init() {
   // Loading the map bundle must not delay the generation form.
   import('./preview.js').then(({ createPreview }) => {
     readForm();
-    preview = createPreview({ initial: { ...state }, config, onMapChange(values) {
+    preview = createPreview({ initial: { ...state }, config,
+      onMarkersChange(markers) { state = { ...state, markers }; edit(); marksPanel.render(); },
+      onSelectMarker(index) { marksPanel.select(index); },
+      onOutsideMarkers(values) { marksPanel.setOutside(values); },
+      onMapChange(values) {
       clearTimeout(editingTimer);
       autocompleteCoordinates.latitude = false; autocompleteCoordinates.longitude = false;
       for (const key of ['latitude', 'longitude']) $(key).value = values[key].toFixed(4);
@@ -231,6 +246,7 @@ async function init() {
       state = { ...state, ...values }; coverageLabel(); edit();
     } });
     preview.setGenerating(running);
+    preview.setResult($('preview-panel').classList.contains('has-result-panel'));
   }).catch(error => {
     console.warn('Preview unavailable', error);
     $('sheet').style.backgroundColor = state.colors.bg;
@@ -322,7 +338,10 @@ async function init() {
       reqData.latitude = $('latitude').value; reqData.longitude = $('longitude').value;
     }
     const searchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(reqData)) searchParams.set(key, value);
+    for (const [key, value] of Object.entries(reqData)) {
+      if (key === 'markers') { if (value.length) searchParams.set(key, encodeMarkers(value)); }
+      else searchParams.set(key, value);
+    }
     history.replaceState({}, '', `${location.pathname}?${searchParams}`);
     running = true;
     $('submit-btn').disabled = true;

@@ -53,6 +53,29 @@ def events(job):
     return result
 
 
+def test_markers_passed_as_plain_dicts(monkeypatch):
+    received = {}
+
+    def render(**kwargs):
+        received.update(kwargs)
+        return "map.png"
+
+    monkeypatch.setattr(renderer, "run_generator", render)
+
+    async def scenario():
+        backend.enqueue_job(backend.GenerateRequest(
+            city="Kyiv", country="Ukraine", markers=[{"type": "pin", "lat": 50, "lon": 30, "label": "Home"}],
+            connect=True, show_heart=True,
+        ))
+        await settle()
+
+    asyncio.run(scenario())
+    assert isinstance(received["markers"][0], dict)
+    assert received["markers"][0]["label"] == "Home"
+    assert received["connect"] is True
+    assert received["show_heart"] is True
+
+
 def test_queue_full_order_and_positions(monkeypatch):
     first_started = threading.Event()
     release = threading.Event()
