@@ -57,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   resultImg.addEventListener('error', showExpiredPoster);
-  window.addEventListener('pagehide', revokePosterUrl);
 
   function showPoster(url, format, filename) {
     if (format === 'pdf') {
