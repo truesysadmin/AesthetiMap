@@ -1,59 +1,69 @@
-# 🎨 AesthetiMap
+# AesthetiMap
 
-Generate stunning, customizable map art posters for any city in the world using OpenStreetMap data.
+Create customizable city map posters using OpenStreetMap data, curated themes, and PNG, SVG, or PDF exports. Adjust coverage up to 50,000 meters, print dimensions from 2 to 40 inches, title placement, gradients, building shadows, and topography.
 
-![AesthetiMap Hero](posters/example.png)
+![AesthetiMap example](docs/example.png)
 
-## ✨ Features
+## Run locally
 
-- **Global Coverage**: Any city, town, or village via OpenStreetMap.
-- **Curated Themes**: Choose from 15+ designer themes (Noir, Gold on Porcelain, Neon Cyberpunk, etc.).
-- **Customizable Layouts**: Positioning controls (Top/Bottom/Center), Toggle-able gradients.
-- **High Resolution**: Optimized for printing up to 40" (Free tier limited to 20").
-- **Multiple Formats**: Export as PNG, SVG, or PDF.
-
-## 🚀 Quick Start (Docker)
-
-The easiest way to run AesthetiMap is via Docker Compose:
+Use Docker Compose for the frontend at http://localhost:8080 and the backend at http://localhost:8000:
 
 ```bash
-# Clone the repository
-git clone git@github.com:truesysadmin/AesthetiMap.git
-cd AesthetiMap
-
-# Start the application
-docker compose up -d
+mkdir -p cache posters
+# On Linux, allow the backend container's UID/GID 1001 to write these bind mounts.
+sudo chown -R 1001:1001 cache posters
+docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-Access the UI at: **http://localhost:3000**
-
-## 🛠️ Usage (CLI)
-
-You can also run the renderer script directly if you have Python installed:
+The production compose file expects an existing external Docker network named `contolstation` and an outer reverse proxy connected to it. Configure that proxy to forward to `frontend:80` and set `X-Real-IP` from its own remote address. It must overwrite any incoming client-supplied `X-Real-IP` header.
 
 ```bash
+docker network create contolstation
+docker compose up -d --build
+```
+
+Both configurations keep cached map data in `./cache` and generated posters in `./posters`. Posters expire through automatic cleanup; regenerate expired shared posters.
+
+## CLI
+
+Install Python dependencies and run the renderer:
+
+```bash
+pip install -r backend/requirements.txt -r requirements.txt
 python renderer.py --city "Kyiv" --country "Ukraine" --theme gold_on_porcelain --span 20000
+python renderer.py --help
 ```
 
-### Options:
-- `--city`, `-c`: City name (required)
-- `--country`, `-C`: Country name (required)
-- `--theme`, `-t`: Theme name (default: terracotta)
-- `--span`, `-d`: Map coverage (total span) in meters (default: 20000)
-- `--width`, `-W`: Width in inches (max 40)
-- `--height`, `-H`: Height in inches (max 40)
-- `--format`, `-f`: Output format (png, svg, pdf)
-- `--text-position`: `top`, `bottom`, or `center`
+## Configuration
 
-## 💎 Premium Features (Roadmap)
-- **Vector Tiles (MVT)**: Sub-second rendering.
-- **Custom Fonts**: Google Fonts integration.
-- **Task Queuing**: Redis/Celery for handling multiple high-res jobs.
-- **Authentication**: JWT-based premium tiers.
+Set these environment variables on the backend service in the compose file:
 
-## ⚖️ License
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MAX_CLEANUP_DAYS` | `7` | Maximum poster age in days. |
+| `MAX_CLEANUP_MB` | `1024` | Maximum total poster storage in MB. |
+| `CLEANUP_INTERVAL_HOURS` | `6` | Time between cleanup runs. |
+| `MAX_SPAN_M` | `50000` | Maximum map coverage in meters. |
+| `MAX_QUEUED` | `5` | Maximum queued generation jobs. |
+| `JOB_TIMEOUT_SECONDS` | `600` | Generation job timeout in seconds. |
+| `STUCK_GRACE_SECONDS` | `300` | Extra time after a timeout before a stuck process exits and Docker restarts it. |
+| `OVERPASS_URLS` | `https://overpass-api.de/api,https://overpass.private.coffee/api` | Comma-separated Overpass endpoint URLs. |
+| `OSM_REQUEST_TIMEOUT` | `60` | OpenStreetMap request timeout in seconds. |
+| `HTTP_USER_AGENT` | `map-poster-service/1.0` | Identifying User-Agent sent to map services. |
 
-Distributed under the MIT License. See `LICENSE` for more information.
+## Checks
 
----
-Created by **Denys Rastiegaiev**
+```bash
+pip install -r backend/requirements.txt -r requirements.txt -r requirements-dev.txt
+flake8 --max-line-length=160
+pytest -q
+cd frontend
+npm ci
+npm run build
+```
+
+## Credits and license
+
+AesthetiMap is based on [maptoposter by Ankur Gupta](https://github.com/originalankur/maptoposter), with application development by Denys Rastiegaiev. The software is distributed under the [MIT License](LICENSE).
+
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). Keep the appropriate map attribution when sharing generated posters.

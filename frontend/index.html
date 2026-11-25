@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Create customizable city map art from OpenStreetMap data and export high-resolution PNG, SVG, or PDF posters." />
+    <meta property="og:title" content="AesthetiMap — Generate Beautiful Map Art" />
+    <meta property="og:description" content="Create customizable city map art from OpenStreetMap data and export high-resolution PNG, SVG, or PDF posters." />
     <title>AesthetiMap — Generate Beautiful Map Art</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./style.css">
   </head>
   <body>
@@ -32,12 +32,12 @@
             <div class="form-group row">
               <div class="input-col position-relative autocomplete-wrapper">
                 <label for="city">City Name *</label>
-                <input type="text" id="city" placeholder="e.g. Paris" autocomplete="off" required>
+                <input type="text" id="city" maxlength="80" placeholder="e.g. Paris" autocomplete="off" required>
                 <div id="autocomplete-list" class="autocomplete-items hidden"></div>
               </div>
               <div class="input-col">
                 <label for="country">Country *</label>
-                <input type="text" id="country" placeholder="e.g. France" required>
+                <input type="text" id="country" maxlength="80" placeholder="e.g. France" required>
               </div>
             </div>
 
@@ -63,17 +63,17 @@
 
             <div class="form-group">
               <label for="span">Map Coverage (m): <span id="span-val">20000</span> m</label>
-              <input type="range" id="span" min="500" max="80000" step="500" value="20000">
+              <input type="range" id="span" min="500" max="50000" step="500" value="20000">
             </div>
 
             <div class="form-group row">
               <div class="input-col">
                 <label for="width">Width (in)</label>
-                <input type="number" id="width" value="12" step="0.5" max="40">
+                <input type="number" id="width" value="12" step="0.5" min="2" max="40">
               </div>
               <div class="input-col">
                 <label for="height">Height (in)</label>
-                <input type="number" id="height" value="16" step="0.5" max="40">
+                <input type="number" id="height" value="16" step="0.5" min="2" max="40">
               </div>
             </div>
 
@@ -154,7 +154,9 @@
       </div>
 
       <footer class="app-footer">
-        &copy; <span id="current-year"></span> Denys Rastiegaiev
+        &copy; <span id="current-year"></span> Denys Rastiegaiev<br>
+        <a href="https://www.openstreetmap.org/copyright">Map data © OpenStreetMap contributors</a><br>
+        <a href="https://github.com/originalankur/maptoposter">Based on maptoposter by Ankur Gupta</a>
       </footer>
     </div>
     <script type="module" src="./main.js"></script>

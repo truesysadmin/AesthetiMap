@@ -15,9 +15,9 @@ AesthetiMap is a full-stack application for generating artistic map posters usin
 ## Build, Test, and Development Commands
 
 ### Full Stack (Docker)
-Run the entire application (Backend on :8000, Frontend on :3000):
+Run the development stack (Backend on :8000, Frontend on :8080):
 ```bash
-docker compose up -d
+docker compose -f docker-compose.dev.yml up -d --build
 ```
 
 ### Backend & CLI
@@ -38,6 +38,14 @@ Develop the UI:
 cd frontend
 npm install
 npm run dev
+```
+
+### Validation
+```bash
+pip install -r backend/requirements.txt -r requirements.txt -r requirements-dev.txt
+flake8 --max-line-length=160
+pytest -q
+cd frontend && npm ci && npm run build
 ```
 
 ## Coding Style & Naming Conventions
