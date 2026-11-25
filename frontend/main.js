@@ -1,3 +1,5 @@
+import '@fontsource/instrument-serif/400.css';
+import { galleryPalette } from './palette.js';
 import '@fontsource/instrument-sans/400.css';
 import '@fontsource/instrument-sans/500.css';
 import '@fontsource/instrument-sans/600.css';
@@ -68,6 +70,18 @@ async function init() {
       document.querySelectorAll(`input[name="${key}-choice"]`).forEach(radio => { radio.checked = radio.value === $(key).value; });
     }
   };
+  function applyGallery() {
+    const palette = galleryPalette(state.colors);
+    const root = document.documentElement.style;
+    for (const [key, value] of Object.entries(palette)) {
+      if (key === 'frame') {
+        for (const [side, color] of Object.entries(value)) root.setProperty(`--frame-${side}`, color);
+      } else root.setProperty(`--${(key === 'mat' ? 'matColor' : key).replace(/[A-Z]/g, char => `-${char.toLowerCase()}`)}`, value);
+    }
+    $('label-city').textContent = state.city;
+    $('label-sub').textContent = `${state.country}, ${state.themeName || state.theme.replaceAll('_', ' ')}`;
+  }
+  applyGallery();
   syncSegments();
   const coverageLabel = () => { $('span-val').textContent = Number($('span').value) >= 1000 ? `${Number($('span').value) / 1000} km` : `${$('span').value} m`; };
   coverageLabel();
@@ -144,15 +158,26 @@ async function init() {
     radio.type = 'radio'; radio.name = 'theme-choice'; radio.value = theme.id;
     radio.setAttribute('aria-label', theme.name);
     radio.checked = theme.id === state.theme;
-    label.append(radio, thumbnail({ ...fallbackColors, ...theme.colors }));
+    const colors = { ...fallbackColors, ...theme.colors };
+    let artwork = thumbnail(colors);
+    if (/^[a-z0-9_-]+$/.test(theme.id)) {
+      artwork = document.createElement('img');
+      artwork.alt = ''; artwork.loading = 'lazy'; artwork.decoding = 'async';
+      artwork.width = 168; artwork.height = 224;
+      artwork.addEventListener('error', () => artwork.replaceWith(thumbnail(colors)), { once: true });
+      artwork.src = `/themes/${theme.id}.webp`;
+    }
+    label.append(radio, artwork);
     $('theme-grid').append(label);
   }
   $('theme').value = state.theme;
   function selectedTheme() {
     const theme = themes.find(item => item.id === $('theme').value) || themes[0];
     state.theme = theme.id;
+    state.themeName = theme.name;
     state.colors = { ...fallbackColors, ...theme.colors };
     $('selected-theme').textContent = theme.name;
+    applyGallery();
   }
   selectedTheme();
 

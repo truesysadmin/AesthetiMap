@@ -1,7 +1,7 @@
 import { Map as LibreMap, setWorkerUrl } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-import { zoomForSpan, spanForZoom, sheetSize, strokePx, scaleRatio, niceScaleBar, titleText, titleSize, formatCoordinates } from './preview-math.js';
+import { detailFactor, zoomForSpan, spanForZoom, framedSheetSize, strokePx, scaleRatio, niceScaleBar, titleText, titleSize, formatCoordinates } from './preview-math.js';
 import { buildStyle } from './map-style.js';
 import '@fontsource/roboto/latin-300.css';
 import '@fontsource/roboto/latin-400.css';
@@ -16,7 +16,6 @@ import '@fontsource/roboto/greek-300.css';
 import '@fontsource/roboto/greek-400.css';
 import '@fontsource/roboto/greek-700.css';
 
-const K = 3;
 const NS = 'http://www.w3.org/2000/svg';
 const byId = id => document.getElementById(id);
 export function svgNode(tag, attrs = {}, text) {
@@ -36,6 +35,8 @@ export function createPreview({ initial, config, onMapChange }) {
   let failed = false;
   let metadataLoaded = false;
   let generating = false;
+  // The map is drawn K times larger and scaled down, so that a small sheet still loads detailed tiles.
+  let K = 3;
   let styleKey;
   let styleReady = false;
   const sheet = byId('sheet');
@@ -195,13 +196,20 @@ export function createPreview({ initial, config, onMapChange }) {
 
   function resize() {
     const stage = byId('preview-stage');
-    const next = sheetSize(Math.max(4, stage.clientWidth - 96), Math.max(4, stage.clientHeight - 96), state.width, state.height);
+    const padding = getComputedStyle(stage);
+    const next = framedSheetSize(Math.max(0, stage.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight)),
+      Math.max(0, stage.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom)), state.width, state.height);
     if (!next.width || !next.height) return;
     size = next;
-    for (const id of ['sheet', 'sheet-wrap']) {
-      byId(id).style.width = `${size.width}px`;
-      byId(id).style.height = `${size.height}px`;
-    }
+    sheet.style.width = `${size.width}px`;
+    sheet.style.height = `${size.height}px`;
+    const wrap = byId('sheet-wrap');
+    wrap.style.setProperty('--mat', `${size.mat}px`);
+    wrap.style.setProperty('--frame', `${size.frame}px`);
+    wrap.style.width = `${size.width + 2 * (size.mat + size.frame)}px`;
+    wrap.style.height = `${size.height + 2 * (size.mat + size.frame)}px`;
+    K = detailFactor(size.width, size.height);
+    canvas.style.setProperty('--k', K);
     canvas.style.width = `${size.width * K}px`;
     canvas.style.height = `${size.height * K}px`;
     canvas.style.transform = `scale(${1 / K})`;

@@ -52,3 +52,17 @@ export function parseCoordinate(text, limit) {
 export function formatCoordinates(lat, lon) {
   return `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'} / ${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`;
 }
+// Mat and moulding are physical proportions of the sheet's short side.
+export function frameBorder(width, height) {
+  const short = Math.min(width, height);
+  return { mat: short * 0.085, frame: short * 0.026 };
+}
+export function framedSheetSize(availableW, availableH, width, height) {
+  const border = frameBorder(width, height);
+  const edge = 2 * (border.mat + border.frame);
+  const factor = Math.max(0, Math.min(availableW / (width + edge), availableH / (height + edge)));
+  return { width: width * factor, height: height * factor, mat: border.mat * factor, frame: border.frame * factor };
+}
+export function detailFactor(sheetWidth, sheetHeight) {
+  return Math.min(6, Math.max(3, 2200 / Math.max(1, sheetWidth, sheetHeight)));
+}
