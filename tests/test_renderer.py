@@ -133,6 +133,7 @@ def test_insufficient_data_not_retried(monkeypatch):
     monkeypatch.setattr(renderer.ox, "features_from_bbox", download)
     assert renderer.fetch_features((0, 0, 1, 1), {"natural": "water"}, "water").empty
     assert download.call_count == 1
+    assert not list(renderer.CACHE_DIR.iterdir())
     monkeypatch.setattr(renderer.ox, "graph_from_bbox", download)
     with pytest.raises(renderer.NoMapData):
         renderer.fetch_graph((0, 0, 1, 1))

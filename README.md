@@ -46,6 +46,7 @@ Set these environment variables on the backend service in the compose file:
 | `MAX_SPAN_M` | `50000` | Maximum map coverage in meters. |
 | `MAX_QUEUED` | `5` | Maximum queued generation jobs. |
 | `JOB_TIMEOUT_SECONDS` | `600` | Generation job timeout in seconds. |
+| `STUCK_GRACE_SECONDS` | `300` | Extra time after a timeout before a stuck process exits and Docker restarts it. |
 | `OVERPASS_URLS` | `https://overpass-api.de/api,https://overpass.private.coffee/api` | Comma-separated Overpass endpoint URLs. |
 | `OSM_REQUEST_TIMEOUT` | `60` | OpenStreetMap request timeout in seconds. |
 | `HTTP_USER_AGENT` | `map-poster-service/1.0` | Identifying User-Agent sent to map services. |

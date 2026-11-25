@@ -536,7 +536,8 @@ def fetch_features(bbox, tags, name, callback=None, progress_base=None, cancel_c
     try:
         data = download_with_fallback(lambda: ox.features_from_bbox(bbox=bbox, tags=tags), cancel_check)
     except InsufficientResponseError:
-        data = GeoDataFrame()
+        # Overpass also answers empty when its own query times out, so do not cache this.
+        return GeoDataFrame()
     try:
         cache_set(key, data)
     except CacheError:

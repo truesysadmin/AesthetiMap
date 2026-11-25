@@ -158,6 +158,32 @@ def test_timeout_keeps_slot_until_worker_finishes(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_stuck_worker_exits_process(monkeypatch):
+    release = threading.Event()
+    exits = []
+
+    def render(**kwargs):
+        release.wait(3)
+        raise renderer.GenerationCancelled()
+
+    def fake_exit(code):
+        exits.append(code)
+        release.set()
+
+    monkeypatch.setattr(renderer, "run_generator", render)
+    monkeypatch.setattr(backend, "JOB_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(backend, "STUCK_GRACE_SECONDS", 0.02)
+    monkeypatch.setattr(backend.os, "_exit", fake_exit)
+
+    async def scenario():
+        backend.enqueue_job(req())
+        await until(lambda: exits)
+        await settle()
+
+    asyncio.run(scenario())
+    assert exits == [1]
+
+
 @pytest.mark.parametrize("exception,message", [
     (renderer.MapDataUnavailable, "The map data server is busy right now. Please try again in a few minutes."),
     (renderer.CityNotFound, "Could not find this city. Check the spelling or enter coordinates."),

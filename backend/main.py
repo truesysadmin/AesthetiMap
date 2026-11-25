@@ -32,6 +32,7 @@ CLEANUP_INTERVAL_HOURS = float(os.getenv("CLEANUP_INTERVAL_HOURS", "6"))
 MAX_SPAN_M = int(os.getenv("MAX_SPAN_M", "50000"))
 MAX_QUEUED = int(os.getenv("MAX_QUEUED", "5"))
 JOB_TIMEOUT_SECONDS = float(os.getenv("JOB_TIMEOUT_SECONDS", "600"))
+STUCK_GRACE_SECONDS = float(os.getenv("STUCK_GRACE_SECONDS", "300"))
 POSTERS_DIR = Path(renderer.POSTERS_DIR)
 BUSY_MESSAGE = "The service is busy. Please try again in a minute."
 TIMEOUT_MESSAGE = "The map took too long to generate. Try a smaller area."
@@ -195,6 +196,11 @@ async def run_generation_task(job):
         if not done:
             job.cancel_event.set()
             job.events.put_nowait({"type": "error", "message": TIMEOUT_MESSAGE})
+            done, _ = await asyncio.wait({worker}, timeout=STUCK_GRACE_SECONDS)
+            if not done:
+                # A thread cannot be killed and it holds the only render slot: let Docker restart us.
+                logger.critical("Generation %s is stuck, exiting", job.id)
+                os._exit(1)
         result = await asyncio.shield(worker)
         if not job.cancel_event.is_set():
             filename = Path(result).name
