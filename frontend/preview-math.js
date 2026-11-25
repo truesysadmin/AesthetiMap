@@ -63,3 +63,6 @@ export function framedSheetSize(availableW, availableH, width, height) {
   const factor = Math.max(0, Math.min(availableW / (width + edge), availableH / (height + edge)));
   return { width: width * factor, height: height * factor, mat: border.mat * factor, frame: border.frame * factor };
 }
+export function detailFactor(sheetWidth, sheetHeight) {
+  return Math.min(6, Math.max(3, 2200 / Math.max(1, sheetWidth, sheetHeight)));
+}

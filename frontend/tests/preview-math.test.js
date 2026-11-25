@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { zoomForSpan, spanForZoom, sheetSize, strokePx, scaleRatio, niceScaleBar, titleText, titleSize, formatCoordinates, parseCoordinate } from '../preview-math.js';
+import { zoomForSpan, spanForZoom, sheetSize, strokePx, scaleRatio, niceScaleBar, titleText, titleSize, formatCoordinates, parseCoordinate, detailFactor } from '../preview-math.js';
 
 for (const lat of [0, 43, 70]) {
   for (const [width, height] of [[12, 16], [16, 12], [12, 12]]) {
@@ -92,4 +92,10 @@ test('physical mat and frame proportions fit all sheet orientations', async () =
       assert.ok(Math.abs(size.width + edge - availableW) < 1e-9 || Math.abs(size.height + edge - availableH) < 1e-9);
     }
   }
+});
+
+test('small sheets get a larger detail factor within limits', () => {
+  assert.equal(detailFactor(800, 900), 3);
+  assert.ok(Math.abs(detailFactor(393, 525) * 525 - 2200) < 1e-9);
+  assert.equal(detailFactor(100, 120), 6);
 });
