@@ -1,0 +1,61 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { zoomForSpan, spanForZoom, sheetSize, strokePx, scaleRatio, niceScaleBar, titleText, titleSize, formatCoordinates } from '../preview-math.js';
+
+for (const lat of [0, 43, 70]) {
+  for (const [width, height] of [[12, 16], [16, 12], [12, 12]]) {
+    test(`zoom/span round trip at latitude ${lat}, ${width} × ${height}`, () => {
+      const sheet = sheetSize(800, 600, width, height);
+      for (const span of [500, 1000, 20000, 50000]) {
+        const pixels = Math.max(sheet.width, sheet.height) * 3;
+        const zoom = zoomForSpan(span, lat, pixels);
+        assert.ok(Math.abs(spanForZoom(zoom, lat, pixels) - span) < 1e-8);
+        const resolution = 40075016.686 * Math.cos(lat * Math.PI / 180) / (512 * 2 ** zoom);
+        assert.ok(Math.abs(resolution * pixels - span) < 1e-8);
+      }
+    });
+  }
+}
+
+test('sheets fit available space and keep their print aspect ratio', () => {
+  assert.deepEqual(sheetSize(800, 600, 12, 16), { width: 450, height: 600 });
+  assert.deepEqual(sheetSize(800, 600, 16, 12), { width: 800, height: 600 });
+  assert.deepEqual(sheetSize(800, 600, 12, 12), { width: 600, height: 600 });
+  assert.deepEqual(sheetSize(0, 600, 12, 16), { width: 0, height: 0 });
+});
+test('point strokes and scale use physical print dimensions', () => {
+  assert.equal(strokePx(1, 864, 12), 1);
+  assert.equal(strokePx(0.4, 1296, 12), 0.6);
+  assert.equal(scaleRatio(20000, 12, 16), 49200);
+  assert.equal(scaleRatio(20000, 16, 12), 49200);
+  assert.equal(scaleRatio(20000, 12, 12), 65600);
+});
+test('ruler uses horizontal coverage for every sheet orientation', () => {
+  for (const [w, h] of [[12, 16], [16, 12], [12, 12]]) {
+    for (const span of [500, 1000, 20000, 50000]) {
+      const bar = niceScaleBar(span, w, h, 600);
+      assert.ok(bar.pixels >= 90 && bar.pixels <= 210);
+      assert.ok([1, 2, 5].includes(Number((bar.metres / 10 ** Math.floor(Math.log10(bar.metres))).toPrecision(1))));
+      assert.equal(bar.pixels / 600, bar.metres / (span * w / Math.max(w, h)));
+    }
+  }
+  assert.equal(niceScaleBar(20000, 12, 16, 600).label, '5 km');
+  assert.ok(Number.isFinite(niceScaleBar(1400, 12, 12, 600).pixels));
+});
+test('title uses the renderer Latin threshold and two preserved spaces', () => {
+  assert.equal(titleText('Kyiv'), 'K  Y  I  V');
+  assert.equal(titleText('MieresEspaña'), 'M  I  E  R  E  S  E  S  P  A  Ñ  A');
+  assert.equal(titleText('Київ'), 'Київ');
+  assert.equal(titleText('Αθήνα'), 'Αθήνα');
+  assert.equal(titleText('abcdЖ'), 'abcdЖ');
+  assert.equal(titleText('abcdeЖ'), 'A  B  C  D  E  Ж');
+  assert.equal(titleText('123'), '1  2  3');
+  assert.equal(titleSize('Kyiv', 12, 16), 60);
+  assert.equal(titleSize('a'.repeat(20), 12, 16), 30);
+  assert.equal(titleSize('a'.repeat(100), 6, 8), 5);
+});
+test('coordinates match renderer output for both hemispheres', () => {
+  assert.equal(formatCoordinates(50.4501, 30.5234), '50.4501° N / 30.5234° E');
+  assert.equal(formatCoordinates(-43.12, -70), '43.1200° S / 70.0000° W');
+  assert.equal(formatCoordinates(0, 0), '0.0000° N / 0.0000° E');
+});

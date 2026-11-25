@@ -3,162 +3,119 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Create customizable city map art from OpenStreetMap data and export high-resolution PNG, SVG, or PDF posters." />
-    <meta property="og:title" content="AesthetiMap — Generate Beautiful Map Art" />
-    <meta property="og:description" content="Create customizable city map art from OpenStreetMap data and export high-resolution PNG, SVG, or PDF posters." />
-    <title>AesthetiMap — Generate Beautiful Map Art</title>
+    <meta name="description" content="Turn a city into a map poster. Choose your colors, frame the map, and download a print-ready PNG, SVG, or PDF." />
+    <meta property="og:title" content="AesthetiMap, print-ready city maps" />
+    <meta property="og:description" content="Turn a city into a map poster. Choose your colors, frame the map, and download a print-ready PNG, SVG, or PDF." />
+    <title>AesthetiMap, print-ready city maps</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <div class="blob-bg">
-      <div class="blob shape1"></div>
-      <div class="blob shape2"></div>
-      <div class="blob shape3"></div>
-    </div>
-
-    <div class="app-container">
-      <header class="app-header">
-        <h1>AesthetiMap</h1>
-        <p>Create stunning, high-definition city maps magically.</p>
-      </header>
-
-      <div class="main-content">
-        <!-- Configuration Panel -->
-        <div class="glass-panel config-panel">
-          <form id="generate-form">
-            <h2 class="panel-title">Configuration</h2>
-
-            <div class="form-group row">
-              <div class="input-col position-relative autocomplete-wrapper">
-                <label for="city">City Name *</label>
-                <input type="text" id="city" maxlength="80" placeholder="e.g. Paris" autocomplete="off" required>
-                <div id="autocomplete-list" class="autocomplete-items hidden"></div>
+    <main class="app-container">
+      <section class="config-panel" aria-label="Poster settings">
+        <header class="app-header">
+          <svg class="brand-glyph" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="2" width="16" height="20" stroke="currentColor"/><path d="M4 17L20 7M4 7L20 17" stroke="currentColor"/></svg>
+          <h1>AesthetiMap</h1>
+        </header>
+        <form id="generate-form">
+          <div class="form-fields">
+            <fieldset class="control-group">
+              <legend>Place</legend>
+              <div class="field autocomplete-wrapper">
+                <label for="city">City</label>
+                <input type="text" id="city" name="city" maxlength="80" placeholder="Kyiv" autocomplete="off" aria-autocomplete="list" aria-controls="autocomplete-list" required />
+                <div id="autocomplete-list" class="autocomplete-items hidden" role="listbox" aria-label="Places"></div>
               </div>
-              <div class="input-col">
-                <label for="country">Country *</label>
-                <input type="text" id="country" maxlength="80" placeholder="e.g. France" required>
+              <div class="field">
+                <label for="country">Country</label>
+                <input type="text" id="country" name="country" maxlength="80" placeholder="Ukraine" required />
               </div>
-            </div>
-
-            <div class="form-group">
-              <label for="theme">Aesthetic Theme</label>
-              <div class="select-wrapper">
-                <select id="theme">
-                  <option value="terracotta">Loading themes...</option>
-                </select>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Theme <span id="selected-theme" class="selected-theme">Terracotta</span></legend>
+              <select id="theme" name="theme" class="hidden" aria-label="Theme"><option value="terracotta">Terracotta</option></select>
+              <div id="theme-grid" class="theme-grid" role="radiogroup" aria-label="Theme"></div>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Frame</legend>
+              <div class="field coverage-field">
+                <div class="field-heading"><label for="span">Coverage</label><output id="span-val" for="span" class="figures">20 km</output></div>
+                <input type="range" id="span" name="span" min="500" max="50000" step="500" value="20000" />
               </div>
-            </div>
-
-            <div class="form-group row">
-              <div class="input-col">
-                <label for="latitude">Latitude (optional)</label>
-                <input type="text" id="latitude" placeholder="e.g. 48.8566">
+              <div class="field-row">
+                <div class="field"><label for="latitude">Latitude</label><input type="text" id="latitude" name="latitude" inputmode="decimal" placeholder="50.4501" class="figures" /></div>
+                <div class="field"><label for="longitude">Longitude</label><input type="text" id="longitude" name="longitude" inputmode="decimal" placeholder="30.5234" class="figures" /></div>
               </div>
-              <div class="input-col">
-                <label for="longitude">Longitude (optional)</label>
-                <input type="text" id="longitude" placeholder="e.g. 2.3522">
+              <div class="field-row">
+                <div class="field"><label for="width">Width <span class="unit">(in)</span></label><input type="number" id="width" name="width" value="12" step="0.5" min="2" max="40" class="figures" /></div>
+                <div class="field"><label for="height">Height <span class="unit">(in)</span></label><input type="number" id="height" name="height" value="16" step="0.5" min="2" max="40" class="figures" /></div>
               </div>
-            </div>
-
-            <div class="form-group">
-              <label for="span">Map Coverage (m): <span id="span-val">20000</span> m</label>
-              <input type="range" id="span" min="500" max="50000" step="500" value="20000">
-            </div>
-
-            <div class="form-group row">
-              <div class="input-col">
-                <label for="width">Width (in)</label>
-                <input type="number" id="width" value="12" step="0.5" min="2" max="40">
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>File</legend>
+              <select id="format" name="format" class="hidden" aria-label="File format"><option value="png">PNG</option><option value="svg">SVG</option><option value="pdf">PDF</option></select>
+              <div class="segmented-control" role="radiogroup" aria-label="File format">
+                <label class="segment-option"><input type="radio" name="format-choice" value="png" checked /><span>PNG</span></label>
+                <label class="segment-option"><input type="radio" name="format-choice" value="svg" /><span>SVG</span></label>
+                <label class="segment-option"><input type="radio" name="format-choice" value="pdf" /><span>PDF</span></label>
               </div>
-              <div class="input-col">
-                <label for="height">Height (in)</label>
-                <input type="number" id="height" value="16" step="0.5" min="2" max="40">
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Lettering</legend>
+              <div class="field"><span class="field-label" id="position-label">Text position</span>
+                <select id="text-position" name="text_position" class="hidden" aria-label="Text position"><option value="bottom">Bottom</option><option value="center">Center</option><option value="top">Top</option></select>
+                <div class="segmented-control" role="radiogroup" aria-labelledby="position-label">
+                  <label class="segment-option"><input type="radio" name="text-position-choice" value="bottom" checked /><span>Bottom</span></label>
+                  <label class="segment-option"><input type="radio" name="text-position-choice" value="center" /><span>Center</span></label>
+                  <label class="segment-option"><input type="radio" name="text-position-choice" value="top" /><span>Top</span></label>
+                </div>
               </div>
-            </div>
-
-            <div class="form-group">
-              <label for="format">Export Format</label>
-              <div class="select-wrapper">
-                <select id="format">
-                  <option value="png">PNG (High Res)</option>
-                  <option value="svg">SVG (Vector)</option>
-                  <option value="pdf">PDF (Print)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-group" style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; margin-bottom: 1.5rem;">
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="no-title" style="width: auto; margin: 0;">
-                <label for="no-title" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Hide City & Country Title</label>
-              </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="no-coords" style="width: auto; margin: 0;">
-                <label for="no-coords" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Hide Coordinates</label>
-              </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="show-buildings" style="width: auto; margin: 0;">
-                <label for="show-buildings" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Show Building Shadows</label>
-              </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="show-contours" style="width: auto; margin: 0;">
-                <label for="show-contours" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Show Topography</label>
-              </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="show-heart" style="width: auto; margin: 0;">
-                <label for="show-heart" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Show Heart at Center</label>
-              </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="gradient-tb" style="width: auto; margin: 0;">
-                <label for="gradient-tb" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Show Top/Bottom Gradient</label>
-              </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="gradient-lr" style="width: auto; margin: 0;">
-                <label for="gradient-lr" style="margin: 0; color: var(--text-secondary); cursor: pointer; text-transform: none; font-weight: 300; font-size: 0.875rem;">Show Left/Right Gradient</label>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="text-position">Text Position</label>
-              <div class="select-wrapper">
-                <select id="text-position">
-                  <option value="bottom">Bottom (default)</option>
-                  <option value="top">Top</option>
-                  <option value="center">Center</option>
-                </select>
-              </div>
-            </div>
-
-            <button type="submit" class="btn-generate" id="submit-btn">
-              <span class="btn-text">Generate Masterpiece</span>
-              <div class="spinner loader-hidden" id="loader"></div>
-            </button>
-          </form>
-        </div>
-
-        <!-- Preview Panel -->
-        <div class="glass-panel preview-panel">
-          <div class="preview-container" id="preview-container">
-            <div class="preview-placeholder">
-              <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="placeholder-icon"><path d="m2 22 5-5"/><path d="m14 2 5 5"/><path d="M11 7 4 14l2 2"/><path d="m13 13 4 4"/><path d="M8 8.5 15.5 16"/><path d="m18 16 4-4-2-2"/></svg>
-              <p>Your creation will appear here.</p>
-            </div>
-            <img id="result-img" class="hidden" alt="Generated Poster" />
+              <label class="check-option"><input type="checkbox" id="no-title" name="no_title" /><span>Hide title</span></label>
+              <label class="check-option"><input type="checkbox" id="no-coords" name="no_coords" /><span>Hide coordinates</span></label>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Map details</legend>
+              <label class="check-option"><input type="checkbox" id="show-buildings" name="show_buildings" /><span>Buildings</span></label>
+              <label class="check-option"><input type="checkbox" id="show-contours" name="show_contours" /><span>Contours</span></label>
+              <label class="check-option"><input type="checkbox" id="show-heart" name="show_heart" /><span>Heart at center</span></label>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Fades</legend>
+              <label class="check-option"><input type="checkbox" id="gradient-tb" name="gradient_tb" /><span>Top and bottom</span></label>
+              <label class="check-option"><input type="checkbox" id="gradient-lr" name="gradient_lr" /><span>Left and right</span></label>
+            </fieldset>
+            <footer class="app-footer">
+              <a href="https://github.com/originalankur/maptoposter" target="_blank" rel="noopener noreferrer">Based on maptoposter by Ankur Gupta</a>
+              <p>© <span id="current-year"></span> Denys Rastiegaiev</p>
+            </footer>
           </div>
-          <div class="action-bar hidden" id="action-bar">
-            <a id="download-btn" href="#" download="poster.png" class="btn-download">Download Result</a>
-            <button id="copy-link-btn" class="btn-download" style="margin-left: 1rem; background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.4); cursor: pointer;">Copy Link to Image</button>
+          <div class="submit-area">
+            <p id="panel-error" class="panel-error" role="alert"></p>
+            <button type="submit" class="btn-generate" id="submit-btn"><span class="btn-text">Create poster</span></button>
+          </div>
+        </form>
+      </section>
+      <section id="preview-panel" class="preview-panel" aria-label="Poster preview">
+        <div id="preview-stage" class="preview-stage">
+          <div id="sheet-wrap" class="sheet-wrap">
+            <span class="crop-mark crop-top-left" aria-hidden="true"></span><span class="crop-mark crop-top-right" aria-hidden="true"></span><span class="crop-mark crop-bottom-left" aria-hidden="true"></span><span class="crop-mark crop-bottom-right" aria-hidden="true"></span>
+            <div id="sheet" class="sheet">
+              <div id="map-viewport" class="map-viewport"><div id="map-canvas" class="map-canvas"></div></div>
+              <svg id="lettering" class="lettering" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+              <p id="preview-note" class="preview-note hidden"></p>
+              <img id="result-img" class="hidden" alt="Your city map poster" />
+              <div id="progress-track" class="progress-track hidden" role="progressbar" aria-label="Creating poster" aria-valuemin="0" aria-valuemax="100"><div id="progress-bar" class="progress-bar"></div></div>
+            </div>
           </div>
         </div>
-      </div>
-
-      <footer class="app-footer">
-        &copy; <span id="current-year"></span> Denys Rastiegaiev<br>
-        <a href="https://www.openmaptiles.org/">© OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> · <a href="https://openfreemap.org">Tiles by OpenFreeMap</a><br>
-        <a href="https://github.com/originalankur/maptoposter">Based on maptoposter by Ankur Gupta</a>
-      </footer>
-    </div>
+        <div id="caption" class="caption">
+          <div class="caption-main"><p id="caption-figures" class="caption-figures">12 × 16 in &nbsp; 20 km</p><svg id="scale-ruler" class="scale-ruler" xmlns="http://www.w3.org/2000/svg" width="112" height="32" aria-label="Map scale"></svg></div>
+          <div class="caption-notes"><p id="preview-status" aria-live="polite"></p><p id="detail-note"></p><p id="contours-note"></p></div>
+          <div class="attribution"><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer">OpenFreeMap</a><a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer">© OpenMapTiles</a><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">Data from OpenStreetMap</a></div>
+          <div class="action-bar hidden" id="action-bar"><a id="download-btn" href="#" download="poster.png" class="btn-download">Download PNG</a><button type="button" id="copy-link-btn" class="btn-secondary">Copy link</button><button type="button" id="edit-btn" class="btn-secondary">Edit</button></div>
+        </div>
+      </section>
+    </main>
     <script type="module" src="./main.js"></script>
   </body>
 </html>
