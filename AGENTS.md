@@ -67,3 +67,5 @@ Follow the conventional commit format observed in the repository:
 - `docs:` for documentation updates
 
 All text in all files have to be in English
+
+Gallery colors are derived in `frontend/palette.js`; keep palette accessibility and physical frame sizing tests passing. Run `tools/theme_thumbnails.py` when adding a theme to refresh the local WebP thumbnails.

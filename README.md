@@ -86,3 +86,5 @@ Create a poster to download PNG, SVG, or PDF, or copy a link to the setup and ge
 The scale ruler uses 1/2/5 lengths near a quarter of the sheet width. In the small gaps where no such length fits the requested 15–35% interval (for example, 1,400 m of horizontal coverage), it uses the nearest nice length.
 
 For a custom public tile provider, allow its origin in the frontend nginx `connect-src` policy as well as setting `PUBLIC_TILES_URL`. The public URL must be reachable by the browser and allow cross-origin requests.
+
+The gallery wall, frame and controls follow the selected theme. The mat and frame scale with the sheet while preserving the map coverage and print aspect ratio. Theme thumbnails are local WebP assets: run `tools/theme_thumbnails.py` whenever a theme is added.

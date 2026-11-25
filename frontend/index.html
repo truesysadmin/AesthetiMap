@@ -14,21 +14,23 @@
     <main class="app-container">
       <section class="config-panel" aria-label="Poster settings">
         <header class="app-header">
-          <svg class="brand-glyph" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="2" width="16" height="20" stroke="currentColor"/><path d="M4 17L20 7M4 7L20 17" stroke="currentColor"/></svg>
           <h1>AesthetiMap</h1>
+          <p>Any place, drawn as a poster</p>
         </header>
         <form id="generate-form">
           <div class="form-fields">
-            <fieldset class="control-group">
+            <fieldset class="control-group place-group">
               <legend>Place</legend>
-              <div class="field autocomplete-wrapper">
-                <label for="city">City</label>
-                <input type="text" id="city" name="city" maxlength="80" placeholder="Kyiv" autocomplete="off" aria-autocomplete="list" aria-controls="autocomplete-list" required />
-                <div id="autocomplete-list" class="autocomplete-items hidden" role="listbox" aria-label="Places"></div>
-              </div>
-              <div class="field">
-                <label for="country">Country</label>
-                <input type="text" id="country" name="country" maxlength="80" placeholder="Ukraine" required />
+              <div class="field-row">
+                <div class="field autocomplete-wrapper">
+                  <label for="city">City</label>
+                  <input type="text" id="city" name="city" maxlength="80" placeholder="Kyiv" autocomplete="off" aria-autocomplete="list" aria-controls="autocomplete-list" required />
+                  <div id="autocomplete-list" class="autocomplete-items hidden" role="listbox" aria-label="Places"></div>
+                </div>
+                <div class="field">
+                  <label for="country">Country</label>
+                  <input type="text" id="country" name="country" maxlength="80" placeholder="Ukraine" required />
+                </div>
               </div>
             </fieldset>
             <fieldset class="control-group">
@@ -98,18 +100,19 @@
       <section id="preview-panel" class="preview-panel" aria-label="Poster preview">
         <div id="preview-stage" class="preview-stage">
           <div id="sheet-wrap" class="sheet-wrap">
-            <span class="crop-mark crop-top-left" aria-hidden="true"></span><span class="crop-mark crop-top-right" aria-hidden="true"></span><span class="crop-mark crop-bottom-left" aria-hidden="true"></span><span class="crop-mark crop-bottom-right" aria-hidden="true"></span>
-            <div id="sheet" class="sheet">
-              <div id="map-viewport" class="map-viewport"><div id="map-canvas" class="map-canvas"></div></div>
-              <svg id="lettering" class="lettering" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
-              <p id="preview-note" class="preview-note hidden"></p>
-              <img id="result-img" class="hidden" alt="Your city map poster" />
+            <div class="sheet-mat">
+              <div id="sheet" class="sheet">
+                <div id="map-viewport" class="map-viewport"><div id="map-canvas" class="map-canvas"></div></div>
+                <svg id="lettering" class="lettering" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+                <p id="preview-note" class="preview-note hidden"></p>
+                <img id="result-img" class="hidden" alt="Your city map poster" />
+              </div>
               <div id="progress-track" class="progress-track hidden" role="progressbar" aria-label="Creating poster" aria-valuemin="0" aria-valuemax="100"><div id="progress-bar" class="progress-bar"></div></div>
             </div>
           </div>
         </div>
         <div id="caption" class="caption">
-          <div class="caption-main"><p id="caption-figures" class="caption-figures">12 × 16 in &nbsp; 20 km</p><svg id="scale-ruler" class="scale-ruler" xmlns="http://www.w3.org/2000/svg" width="112" height="32" aria-label="Map scale"></svg></div>
+          <div class="caption-main"><div class="museum-label"><p id="label-city">Kyiv</p><p id="label-sub">Ukraine, terracotta</p><p id="caption-figures" class="caption-figures">12 × 16 in &nbsp; 20 km</p></div><svg id="scale-ruler" class="scale-ruler" xmlns="http://www.w3.org/2000/svg" width="112" height="32" aria-label="Map scale"></svg></div>
           <div class="caption-notes"><p id="preview-status" aria-live="polite"></p><p id="detail-note"></p><p id="contours-note"></p></div>
           <div class="attribution"><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer">OpenFreeMap</a><a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer">© OpenMapTiles</a><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">Data from OpenStreetMap</a></div>
           <div class="action-bar hidden" id="action-bar"><a id="download-btn" href="#" download="poster.png" class="btn-download">Download PNG</a><button type="button" id="copy-link-btn" class="btn-secondary">Copy link</button><button type="button" id="edit-btn" class="btn-secondary">Edit</button></div>

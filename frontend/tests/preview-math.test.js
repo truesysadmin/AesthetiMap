@@ -75,3 +75,21 @@ test('coordinate text in decimal and degree forms', () => {
   for (const bad of ['', null, undefined, 'abc', '41,15', '86', '-85.1', '10 75', '1e5', '12.5.6']) assert.equal(parseCoordinate(bad, 85), null, String(bad));
   assert.equal(parseCoordinate('181', 180), null);
 });
+
+test('physical mat and frame proportions fit all sheet orientations', async () => {
+  const { frameBorder, framedSheetSize } = await import('../preview-math.js');
+  assert.deepEqual(frameBorder(12, 16), { mat: 1.02, frame: 0.312 });
+  for (const [w, h] of [[12, 16], [16, 12], [12, 12], [2, 40]]) {
+    for (const [availableW, availableH] of [[800, 600], [312, 400], [0, 600]]) {
+      const size = framedSheetSize(availableW, availableH, w, h);
+      const edge = 2 * (size.mat + size.frame);
+      assert.ok(size.width + edge <= availableW + 1e-9);
+      assert.ok(size.height + edge <= availableH + 1e-9);
+      if (!availableW) { assert.deepEqual(size, { width: 0, height: 0, mat: 0, frame: 0 }); continue; }
+      assert.ok(Math.abs(size.width / size.height - w / h) < 1e-10);
+      assert.ok(Math.abs(size.mat / Math.min(size.width, size.height) - 0.085) < 1e-10);
+      assert.ok(Math.abs(size.frame / Math.min(size.width, size.height) - 0.026) < 1e-10);
+      assert.ok(Math.abs(size.width + edge - availableW) < 1e-9 || Math.abs(size.height + edge - availableH) < 1e-9);
+    }
+  }
+});
