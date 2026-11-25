@@ -1,8 +1,10 @@
 import asyncio
 import json
+import logging
 from pathlib import Path
 import re
 import threading
+import unicodedata
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -205,6 +207,93 @@ def test_errors_are_sanitized(monkeypatch, exception, message, caplog):
 
     asyncio.run(scenario())
     assert "private exception detail" in caplog.text
+    records = [record for record in caplog.records if "failed" in record.getMessage()]
+    assert len(records) == 1
+    assert records[0].levelno == (logging.ERROR if exception is RuntimeError else logging.WARNING)
+    assert bool(records[0].exc_info) == (exception is RuntimeError)
+
+
+@pytest.mark.parametrize("exception", [renderer.MapDataUnavailable, renderer.CityNotFound, renderer.NoMapData, RuntimeError])
+def test_cancelled_task_logs_worker_errors(monkeypatch, caplog, exception):
+    started = threading.Event()
+    release = threading.Event()
+
+    def fail(**kwargs):
+        started.set()
+        assert release.wait(3)
+        raise exception("first line\nsecond line")
+
+    monkeypatch.setattr(renderer, "run_generator", fail)
+
+    async def scenario():
+        backend.enqueue_job(req())
+        task = next(iter(backend.tasks))
+        try:
+            await until(started.is_set)
+            task.cancel()
+            await asyncio.sleep(0)
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await settle()
+
+    asyncio.run(scenario())
+    records = [record for record in caplog.records if "Cancelled generation" in record.getMessage()]
+    assert len(records) == 1
+    assert records[0].levelno == (logging.ERROR if exception is RuntimeError else logging.WARNING)
+    assert bool(records[0].exc_info) == (exception is RuntimeError)
+    if exception is not RuntimeError:
+        assert "\n" not in records[0].getMessage()
+
+
+def test_config(monkeypatch):
+    client = TestClient(backend.app)
+    monkeypatch.delenv("PUBLIC_TILES_URL", raising=False)
+    assert client.get("/api/config").json() == {"tiles_url": backend.tiles.TILES_URL, "max_span": backend.MAX_SPAN_M}
+    monkeypatch.setenv("PUBLIC_TILES_URL", "https://tiles.example/planet")
+    assert client.get("/api/config").json() == {"tiles_url": "https://tiles.example/planet", "max_span": backend.MAX_SPAN_M}
+
+
+def test_theme_colors_allowlist_and_fallback(monkeypatch, tmp_path):
+    theme = {
+        "name": "Test", "description": "A palette", "bg": "#Ab12cD", "text": "#123456",
+        "road_tertiary": "#abcdef", "road_residential": "#FEDCBA", "road_default": "invalid",
+        "building": "#fff", "water": "red", "parks": 123, "gradient_color": "#123456\n",
+        "road_primary": "#234567", "road_secondary": "#345678", "road_motorway": "#456789",
+        "unknown": "#ffffff",
+    }
+    (tmp_path / "test.json").write_text(json.dumps(theme))
+    monkeypatch.setattr(renderer, "THEMES_DIR", str(tmp_path))
+    response = TestClient(backend.app).get("/api/themes")
+    assert response.status_code == 200
+    assert response.json() == {"themes": [{
+        "id": "test", "name": "Test", "description": "A palette",
+        "colors": {
+            "bg": "#Ab12cD", "text": "#123456", "road_tertiary": "#abcdef", "road_residential": "#FEDCBA",
+            "road_primary": "#234567", "road_secondary": "#345678", "road_motorway": "#456789",
+            "road_default": "#abcdef", "building": "#FEDCBA",
+        },
+    }]}
+    theme.update(road_default="#111111", building="#222222", water="#333333", parks="#444444", gradient_color="#555555")
+    (tmp_path / "test.json").write_text(json.dumps(theme))
+    colors = TestClient(backend.app).get("/api/themes").json()["themes"][0]["colors"]
+    assert colors["road_default"] == "#111111"
+    assert colors["building"] == "#222222"
+    assert colors["water"] == "#333333"
+    assert colors["parks"] == "#444444"
+    assert colors["gradient_color"] == "#555555"
+
+
+def test_all_themes_have_valid_colors_and_no_emoji_names():
+    themes = TestClient(backend.app).get("/api/themes").json()["themes"]
+    assert themes
+    for theme in themes:
+        assert theme["colors"]
+        assert theme["colors"].keys() <= backend.THEME_COLOR_KEYS
+        assert all(re.fullmatch(r"#[0-9A-Fa-f]{6}", value) for value in theme["colors"].values())
+        assert not any(unicodedata.category(char) in {"So", "Sk"} or re.match(r"[\ufe0e\ufe0f\U0001f1e6-\U0001f1ff]", char)
+                       for char in theme["name"])
 
 
 def test_stream_headers_encoded_url_and_generator_close(monkeypatch):

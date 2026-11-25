@@ -48,6 +48,7 @@ Set these environment variables on the backend service in the compose file:
 | `JOB_TIMEOUT_SECONDS` | `600` | Generation job timeout in seconds. |
 | `STUCK_GRACE_SECONDS` | `300` | Extra time after a timeout before a stuck process exits and Docker restarts it. |
 | `TILES_URL` | `https://tiles.openfreemap.org/planet` | OpenMapTiles-schema TileJSON endpoint. |
+| `PUBLIC_TILES_URL` | Value of `TILES_URL` | Browser-accessible TileJSON endpoint for the live preview. |
 | `HTTP_USER_AGENT` | `map-poster-service/1.0` | Identifying User-Agent sent to map services. |
 
 ## Checks
@@ -58,6 +59,7 @@ flake8 --max-line-length=160
 pytest -q
 cd frontend
 npm ci
+npm test
 npm run build
 ```
 
@@ -71,6 +73,16 @@ Map data © [OpenMapTiles](https://www.openmaptiles.org/) © [OpenStreetMap cont
 
 Map geometry comes from OpenMapTiles-schema vector tiles, supplied by [OpenFreeMap](https://openfreemap.org) by default. TileJSON is cached for one hour, with a stale fallback during provider outages. Tiles and geocoder JSON results are cached on disk.
 
-Provider terms are hard limits: at most four concurrent requests, 1,000 tile requests and 45 MB per user job. The renderer targets at most 200 tiles and lowers zoom if a tile set exceeds 30 MB. Individual tiles are limited to 8 MB. Requests occur only during user jobs; there is no prefetching or background refresh.
+Provider terms are hard limits: at most four concurrent requests, 1,000 tile requests and 45 MB per user job. The renderer targets at most 200 tiles and lowers zoom if a tile set exceeds 30 MB. Individual tiles are limited to 8 MB. These limits apply to server rendering during user jobs; the renderer does not prefetch or refresh data in the background. The browser preview also loads vector tiles as the map is framed.
 
 For self-hosting, set `TILES_URL` to any TileJSON server using the OpenMapTiles schema, for example `go-pmtiles serve`. HTTPS tile templates are required unless the TileJSON endpoint itself uses HTTP. Preserve the generated attribution: “© OpenMapTiles © OpenStreetMap contributors · aesthetimap.rastiegaiev.com”.
+
+## Live preview
+
+The editor starts with Kyiv and a 12 × 16 inch Terracotta poster. Drag or zoom the sheet to frame the map, or choose a city from the place list. Coverage measures the longest side of the poster. Changing the print dimensions keeps the map center and coverage. Theme colors, lettering, buildings, and fades update before generation; contours appear in the finished poster.
+
+Create a poster to download PNG, SVG, or PDF, or copy a link to the setup and generated file. Editing returns to the live map. If the browser cannot display the preview, poster generation remains available.
+
+The scale ruler uses 1/2/5 lengths near a quarter of the sheet width. In the small gaps where no such length fits the requested 15–35% interval (for example, 1,400 m of horizontal coverage), it uses the nearest nice length.
+
+For a custom public tile provider, allow its origin in the frontend nginx `connect-src` policy as well as setting `PUBLIC_TILES_URL`. The public URL must be reachable by the browser and allow cross-origin requests.

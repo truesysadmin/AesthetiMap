@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import renderer  # noqa: E402
+import tiles  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aesthetimap")
@@ -36,6 +38,10 @@ STUCK_GRACE_SECONDS = float(os.getenv("STUCK_GRACE_SECONDS", "300"))
 POSTERS_DIR = Path(renderer.POSTERS_DIR)
 BUSY_MESSAGE = "The service is busy. Please try again in a minute."
 TIMEOUT_MESSAGE = "The map took too long to generate. Try a smaller area."
+THEME_COLOR_KEYS = frozenset({
+    "bg", "text", "gradient_color", "water", "parks", "building", "road_motorway", "road_primary",
+    "road_secondary", "road_tertiary", "road_residential", "road_default",
+})
 
 
 class GenerateRequest(BaseModel):
@@ -170,6 +176,15 @@ def error_message(exc, task_id):
     return f"Generation failed. Reference: {task_id[:8]}"
 
 
+def log_generation_error(exc, task_id, cancelled=False):
+    context = "Cancelled generation" if cancelled else "Generation"
+    if isinstance(exc, (renderer.MapDataUnavailable, renderer.CityNotFound, renderer.NoMapData)):
+        detail = " ".join(str(exc).splitlines())
+        logger.warning("%s %s failed: %s: %s", context, task_id, type(exc).__name__, detail)
+    else:
+        logger.exception("%s %s failed", context, task_id)
+
+
 async def run_generation_task(job):
     global running_job
     loop = asyncio.get_running_loop()
@@ -222,11 +237,11 @@ async def run_generation_task(job):
                 worker.result()
             except renderer.GenerationCancelled:
                 pass
-            except Exception:
-                logger.exception("Cancelled generation %s failed", job.id)
+            except Exception as exc:
+                log_generation_error(exc, job.id, cancelled=True)
         raise
     except Exception as exc:
-        logger.exception("Generation %s failed", job.id)
+        log_generation_error(exc, job.id)
         if not job.cancel_event.is_set():
             job.events.put_nowait({"type": "error", "message": error_message(exc, job.id)})
     finally:
@@ -292,6 +307,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AesthetiMap API", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
+@app.get("/api/config")
+def get_config():
+    return {"tiles_url": os.getenv("PUBLIC_TILES_URL", tiles.TILES_URL), "max_span": MAX_SPAN_M}
+
+
 @app.get("/api/themes")
 def get_themes():
     themes = []
@@ -300,8 +320,13 @@ def get_themes():
             with open(filename, encoding="utf-8") as source:
                 data = json.load(source)
             theme_id = Path(filename).stem
+            colors = {key: value for key, value in data.items()
+                      if key in THEME_COLOR_KEYS and isinstance(value, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", value)}
+            for key, fallback in (("road_default", "road_tertiary"), ("building", "road_residential")):
+                if key not in colors and fallback in colors:
+                    colors[key] = colors[fallback]
             themes.append({"id": theme_id, "name": data.get("name", theme_id.replace("_", " ").title()),
-                           "description": data.get("description", "")})
+                           "description": data.get("description", ""), "colors": colors})
         except Exception:
             logger.exception("Error loading theme %r", filename)
     return {"themes": sorted(themes, key=lambda theme: theme["name"])}
