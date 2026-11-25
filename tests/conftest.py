@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ["CACHE_DIR"] = tempfile.mkdtemp(prefix="aesthetimap-test-cache-")
 
 import renderer  # noqa: E402
+import tiles  # noqa: E402
 from backend import main as backend  # noqa: E402
 
 
@@ -20,6 +21,7 @@ def isolated_storage(monkeypatch, tmp_path):
     cache.mkdir()
     posters.mkdir()
     monkeypatch.setattr(renderer, "CACHE_DIR", cache)
+    monkeypatch.setattr(tiles, "CACHE_DIR", cache)
     monkeypatch.setattr(renderer, "CACHE_DIR_PATH", str(cache))
     monkeypatch.setattr(renderer, "POSTERS_DIR", str(posters))
     monkeypatch.setattr(backend, "POSTERS_DIR", posters)
