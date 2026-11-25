@@ -2,3 +2,4 @@
 import './preview-math.test.js';
 import './map-style.test.js';
 import './palette.test.js';
+import './markers.test.js';

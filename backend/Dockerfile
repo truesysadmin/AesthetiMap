@@ -24,7 +24,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     MPLCONFIGDIR=/tmp/mpl \
     HOME=/tmp \
     XDG_CACHE_HOME=/tmp/.cache
-COPY renderer.py tiles.py font_management.py ./
+COPY renderer.py markers.py marker_shapes.json tiles.py font_management.py ./
 COPY backend/ backend/
 COPY themes/ themes/
 COPY fonts/ fonts/

@@ -79,7 +79,13 @@
               <legend>Map details</legend>
               <label class="check-option"><input type="checkbox" id="show-buildings" name="show_buildings" /><span>Buildings</span></label>
               <label class="check-option"><input type="checkbox" id="show-contours" name="show_contours" /><span>Contours</span></label>
-              <label class="check-option"><input type="checkbox" id="show-heart" name="show_heart" /><span>Heart at center</span></label>
+            </fieldset>
+            <fieldset class="control-group marks-group">
+              <legend>Marks</legend>
+              <div id="marks-list"></div>
+              <button type="button" id="add-mark" class="btn-secondary">Add a mark</button>
+              <p id="marks-limit" class="mark-limit" hidden>Up to 5 marks</p>
+              <label class="check-option" hidden><input type="checkbox" id="connect-marks" /><span>Join with a dotted line</span></label>
             </fieldset>
             <fieldset class="control-group">
               <legend>Fades</legend>

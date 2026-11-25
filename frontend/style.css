@@ -177,3 +177,34 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border: 2px s
   .theme-grid label:hover svg, .theme-grid label:hover img,
   .btn-generate:active, .btn-download:active, .btn-secondary:active { transform: none; }
 }
+
+/* Marks share the form's quiet controls and theme accent. */
+[hidden] { display: none !important; }
+.mark-item { border-bottom: 1px solid var(--hairline); }
+.mark-row { display: flex; align-items: center; gap: 4px; }
+.mark-select { display: flex; align-items: center; flex: 1; gap: 12px; min-width: 0; min-height: 48px; padding: 4px; text-align: left; border: 0; background: transparent; font-size: 13px; }
+.mark-select > span:last-child { overflow-wrap: anywhere; }
+.mark-tile { flex: 0 0 32px; width: 32px; height: 32px; padding: 4px; background: var(--table); border-radius: 4px; }
+.mark-tile svg { width: 100%; height: 100%; }
+.mark-remove { width: 40px; height: 40px; border: 0; background: transparent; color: var(--secondary); font-size: 22px; }
+.mark-editor { display: flex; flex-direction: column; gap: 12px; padding: 8px 4px 16px; }
+.mark-shapes { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.mark-shapes button { height: 40px; padding: 8px 4px; border: 1px solid var(--hairline); border-radius: 4px; background: var(--raised); }
+.mark-shapes svg { width: 100%; height: 100%; }
+.mark-shapes [aria-checked='true'], .mark-colors [aria-pressed='true'] { border-color: var(--accent); outline: 1px solid var(--accent); outline-offset: 1px; }
+.mark-item.selected > .mark-row { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.mark-outside, .mark-limit { display: block; color: var(--muted); font-size: 12px; line-height: 20px; }
+.mark-value { float: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.mark-slider input { min-height: 40px; }
+.mark-colors { display: flex; align-items: center; gap: 8px; }
+.mark-colors button { width: 40px; height: 40px; border: 1px solid var(--hairline); border-radius: 4px; background: var(--raised); padding: 8px; }
+.mark-colors button::after { content: ''; display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--swatch); border: 1px solid var(--hairline); }
+.mark-colors input { width: 40px; height: 40px; padding: 4px; border: 1px solid var(--hairline); border-radius: 4px; background: var(--raised); }
+.mark-center { min-height: 40px; align-self: flex-start; padding: 4px 8px; border: 0; background: transparent; color: var(--secondary); }
+#add-mark { min-height: 40px; }
+.mark-interactive { pointer-events: auto; cursor: grab; touch-action: none; }
+.mark-interactive:active { cursor: grabbing; }
+.mark-interactive:focus { outline: none; }
+.mark-interactive:focus-visible .mark-focus { stroke-opacity: 1; }
+.mark-focus { fill: none; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; stroke-opacity: 0; pointer-events: none; }
+.mark-selected .mark-focus { stroke-opacity: 1; }

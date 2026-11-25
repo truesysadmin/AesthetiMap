@@ -32,6 +32,7 @@ from lat_lon_parser import parse
 from matplotlib.font_manager import FontProperties
 
 from font_management import load_fonts
+from markers import draw_markers, with_legacy_heart
 
 
 import tiles
@@ -364,6 +365,8 @@ def create_poster(
     show_buildings=False,
     show_contours=False,
     show_heart=False,
+    markers=None,
+    connect=False,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
 ):
@@ -523,14 +526,11 @@ def create_poster(
         # Typography
         scale_factor = min(height, width) / 12.0
 
-        if show_heart:
-            log("Rendering heart at center...", callback, 93)
-            center_x = sum(crop_xlim) / 2.0
-            center_y = sum(crop_ylim) / 2.0
-            # Use a classic red heart. Fallback fonts will handle the unicode glyph safely.
-            heart_size = 50 * scale_factor
-            ax.text(center_x, center_y, "♥", color="#FF2A2A",
-                    fontsize=heart_size, ha="center", va="center", zorder=100)
+        poster_markers = with_legacy_heart(markers, show_heart)
+        if poster_markers:
+            log("Rendering marks...", callback, 93)
+            projection = Transformer.from_crs("EPSG:4326", tiles.local_crs(point), always_xy=True)
+            draw_markers(ax, poster_markers, connect, theme, (crop_xlim, crop_ylim), projection.transform, scale_factor)
 
         base_main = 60
         base_sub = 22
@@ -573,8 +573,10 @@ def create_poster(
             y_city, y_sep, y_country, y_coords = 0.14, 0.125, 0.10, 0.07
 
         if not no_title:
-            ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_main_adjusted, zorder=11)
-            ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=theme["text"], ha="center", fontproperties=font_sub, zorder=11)
+            ax.text(0.5, y_city, spaced_city, transform=ax.transAxes, color=theme["text"],
+                    ha="center", fontproperties=font_main_adjusted, zorder=11, parse_math=False)
+            ax.text(0.5, y_country, display_country.upper(), transform=ax.transAxes, color=theme["text"],
+                    ha="center", fontproperties=font_sub, zorder=11, parse_math=False)
             ax.plot([0.4, 0.6], [y_sep, y_sep], transform=ax.transAxes, color=theme["text"], linewidth=1 * scale_factor, zorder=11)
 
         if not no_coords:
@@ -628,6 +630,8 @@ def run_generator(
     show_buildings: bool = False,
     show_contours: bool = False,
     show_heart: bool = False,
+    markers=None,
+    connect: bool = False,
     callback: Optional[Callable[[str, Optional[int]], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
 ):
@@ -649,7 +653,7 @@ def run_generator(
         fonts=custom_fonts, no_title=no_title, no_coords=no_coords,
         gradient_tb=gradient_tb, gradient_lr=gradient_lr,
         text_position=text_position, show_buildings=show_buildings,
-        show_contours=show_contours, show_heart=show_heart, callback=callback, cancel_check=cancel_check
+        show_contours=show_contours, show_heart=show_heart, markers=markers, connect=connect, callback=callback, cancel_check=cancel_check
     )
     return output_file
 
