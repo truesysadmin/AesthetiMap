@@ -231,11 +231,13 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
   function limits() {
     if (!map) return;
     const lat = latitude();
-    // Reset both ends first so a large aspect-ratio change cannot cross old limits.
-    map.setMinZoom(-2);
-    map.setMaxZoom(24);
-    map.setMinZoom(zoomForSpan(config.max_span, lat, longSide()));
-    map.setMaxZoom(zoomForSpan(500, lat, longSide()));
+    const min = zoomForSpan(config.max_span, lat, longSide());
+    const max = zoomForSpan(500, lat, longSide());
+    // Every limit change queues a camera event in MapLibre 6, and moveend calls this function,
+    // so only real changes are applied. The order keeps min <= max at every step.
+    const same = (a, b) => Math.abs(a - b) < 1e-6;
+    if (same(min, map.getMinZoom()) && same(max, map.getMaxZoom())) return;
+    if (min > map.getMaxZoom()) { map.setMaxZoom(max); map.setMinZoom(min); } else { map.setMinZoom(min); map.setMaxZoom(max); }
   }
 
   function syncMap(fly = false) {
@@ -291,6 +293,12 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
         const lat = Number(center.lat.toFixed(4));
         const lon = Number(center.lng.toFixed(4));
         const span = Math.min(config.max_span, Math.max(500, Math.round(spanForZoom(map.getZoom(), lat, longSide()) / 100) * 100));
+        // MapLibre 6 delivers move events after our own jumpTo and limit changes, so the guard
+        // flag misses them. Stopping when nothing changed ends that chain of events.
+        // The form may hold more decimals than the map writes, so compare at the map's precision.
+        const round = (value, digits) => (value == null ? value : Number(Number(value).toFixed(digits)));
+        if (lat === round(state.latitude, 4) && lon === round(state.longitude, 4)
+          && span === Math.round(state.span / 100) * 100) return;
         state = { ...state, latitude: lat, longitude: lon, span };
         onMapChange({ latitude: lat, longitude: lon, span });
         syncMap();
