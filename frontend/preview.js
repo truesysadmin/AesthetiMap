@@ -32,6 +32,7 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
   let map;
   let size = { width: 0, height: 0 };
   let guard = false;
+  let ownCamera = null;
   let flying = false;
   let failed = false;
   let metadataLoaded = false;
@@ -256,7 +257,12 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
       map.stop();
       flying = true;
       map.flyTo({ ...camera, duration: 600 });
-    } else map.jumpTo(camera);
+    } else {
+      map.jumpTo(camera);
+      // Remember where our own move left the camera: its moveend arrives later and is not the user's.
+      const center = map.getCenter();
+      ownCamera = { lng: center.lng, lat: center.lat, zoom: map.getZoom() };
+    }
     guard = false;
   }
 
@@ -289,7 +295,10 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
       map.on('moveend', () => {
         if (guard || generating) return;
         if (flying) { flying = false; return; }
-        const center = map.getCenter().wrap();
+        const now = map.getCenter();
+        if (ownCamera && now.lng === ownCamera.lng && now.lat === ownCamera.lat && map.getZoom() === ownCamera.zoom) return;
+        ownCamera = null;
+        const center = now.wrap();
         const lat = Number(center.lat.toFixed(4));
         const lon = Number(center.lng.toFixed(4));
         const span = Math.min(config.max_span, Math.max(500, Math.round(spanForZoom(map.getZoom(), lat, longSide()) / 100) * 100));
