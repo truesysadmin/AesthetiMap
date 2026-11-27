@@ -53,6 +53,8 @@ Set these environment variables on the backend service in the compose file:
 
 ## Checks
 
+Browser regression tests: in `frontend`, run `npm run build && npm run test:e2e` (first time: `npx playwright install chromium`).
+
 ```bash
 pip install -r backend/requirements.txt -r requirements.txt -r requirements-dev.txt
 flake8 --max-line-length=160

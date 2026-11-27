@@ -89,6 +89,12 @@ input[type='range'] { width: 100%; height: 20px; margin: 0; accent-color: var(--
 .map-viewport { position: absolute; inset: 0; overflow: hidden; }
 .map-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; transition: opacity 200ms var(--ease); }
 .lettering { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; font-family: 'Roboto', sans-serif; }
+.map-loading { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; overflow: hidden; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 150ms var(--ease); }
+.map-loading.active { opacity: 1; }
+.map-loading::before { content: ''; display: block; width: 32%; height: 100%; background: var(--accent); }
+.map-loading.active::before { animation: map-loading 1.1s linear infinite; }
+@keyframes map-loading { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+.sheet.generating .map-loading, .sheet.has-result .map-loading, .sheet.unlocated .map-loading, .sheet.unavailable .map-loading { display: none; }
 .sheet.unlocated .map-canvas, .sheet.unavailable .map-canvas, .sheet.generating .map-canvas { opacity: .32; }
 .sheet.generating .map-viewport { pointer-events: none; }
 .sheet.has-result .map-viewport, .sheet.has-result .lettering { visibility: hidden; }
@@ -139,6 +145,7 @@ input[type='range'] { width: 100%; height: 20px; margin: 0; accent-color: var(--
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; scroll-behavior: auto !important; }
+  .map-loading::before, .map-loading.active::before { animation: none; width: 100%; opacity: .5; }
 }
 
 .panel-error:empty { display: none; }

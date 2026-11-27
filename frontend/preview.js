@@ -41,6 +41,7 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
   let selected = -1;
   let marksGroup;
   let drag;
+  let loadingTimer;
   // The map is drawn K times larger and scaled down, so that a small sheet still loads detailed tiles.
   let K = 3;
   let styleKey;
@@ -56,7 +57,13 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
     stroke: pt => strokePx(pt * Math.min(state.width, state.height) / 12, size.width * K, state.width),
     showBuildings: state.show_buildings });
 
+  function stopLoading() {
+    clearTimeout(loadingTimer); loadingTimer = undefined;
+    byId('map-loading').classList.remove('active'); sheet.removeAttribute('aria-busy');
+  }
+
   function note() {
+    if (failed) stopLoading();
     const unlocated = state.latitude == null || state.longitude == null;
     sheet.classList.toggle('unlocated', unlocated);
     sheet.classList.toggle('unavailable', failed);
@@ -290,6 +297,17 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
       map.on('move', drawMarks);
       map.once('load', () => { styleReady = true; syncMap(); });
       map.once('idle', () => performance.mark('preview-idle'));
+      const loading = byId('map-loading');
+      map.on('dataloading', () => {
+        if (loadingTimer || loading.classList.contains('active')) return;
+        loadingTimer = setTimeout(() => {
+          loadingTimer = undefined;
+          if (failed || map.loaded()) return;
+          loading.classList.add('active');
+          sheet.setAttribute('aria-busy', 'true');
+        }, 300);
+      });
+      map.on('idle', stopLoading);
       map.on('webglcontextlost', () => { failed = true; note(); });
       // Wheel zoom ends without an original event, so our own moves are marked instead.
       map.on('moveend', () => {
@@ -373,6 +391,6 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
     },
     setSelected(index) { selected = index; drawMarks(); },
     setResult(value) { result = value; if (value) endDrag(); drawMarks(); },
-    destroy() { observer.disconnect(); window.removeEventListener('resize', resize); map?.remove(); },
+    destroy() { stopLoading(); observer.disconnect(); window.removeEventListener('resize', resize); map?.remove(); },
   };
 }
