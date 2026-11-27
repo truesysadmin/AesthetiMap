@@ -32,6 +32,7 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
   let map;
   let size = { width: 0, height: 0 };
   let guard = false;
+  let ownCamera = null;
   let flying = false;
   let failed = false;
   let metadataLoaded = false;
@@ -40,6 +41,7 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
   let selected = -1;
   let marksGroup;
   let drag;
+  let loadingTimer;
   // The map is drawn K times larger and scaled down, so that a small sheet still loads detailed tiles.
   let K = 3;
   let styleKey;
@@ -55,7 +57,13 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
     stroke: pt => strokePx(pt * Math.min(state.width, state.height) / 12, size.width * K, state.width),
     showBuildings: state.show_buildings });
 
+  function stopLoading() {
+    clearTimeout(loadingTimer); loadingTimer = undefined;
+    byId('map-loading').classList.remove('active'); sheet.removeAttribute('aria-busy');
+  }
+
   function note() {
+    if (failed) stopLoading();
     const unlocated = state.latitude == null || state.longitude == null;
     sheet.classList.toggle('unlocated', unlocated);
     sheet.classList.toggle('unavailable', failed);
@@ -231,11 +239,13 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
   function limits() {
     if (!map) return;
     const lat = latitude();
-    // Reset both ends first so a large aspect-ratio change cannot cross old limits.
-    map.setMinZoom(-2);
-    map.setMaxZoom(24);
-    map.setMinZoom(zoomForSpan(config.max_span, lat, longSide()));
-    map.setMaxZoom(zoomForSpan(500, lat, longSide()));
+    const min = zoomForSpan(config.max_span, lat, longSide());
+    const max = zoomForSpan(500, lat, longSide());
+    // Every limit change queues a camera event in MapLibre 6, and moveend calls this function,
+    // so only real changes are applied. The order keeps min <= max at every step.
+    const same = (a, b) => Math.abs(a - b) < 1e-6;
+    if (same(min, map.getMinZoom()) && same(max, map.getMaxZoom())) return;
+    if (min > map.getMaxZoom()) { map.setMaxZoom(max); map.setMinZoom(min); } else { map.setMinZoom(min); map.setMaxZoom(max); }
   }
 
   function syncMap(fly = false) {
@@ -254,7 +264,12 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
       map.stop();
       flying = true;
       map.flyTo({ ...camera, duration: 600 });
-    } else map.jumpTo(camera);
+    } else {
+      map.jumpTo(camera);
+      // Remember where our own move left the camera: its moveend arrives later and is not the user's.
+      const center = map.getCenter();
+      ownCamera = { lng: center.lng, lat: center.lat, zoom: map.getZoom() };
+    }
     guard = false;
   }
 
@@ -282,15 +297,35 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
       map.on('move', drawMarks);
       map.once('load', () => { styleReady = true; syncMap(); });
       map.once('idle', () => performance.mark('preview-idle'));
+      const loading = byId('map-loading');
+      map.on('dataloading', () => {
+        if (loadingTimer || loading.classList.contains('active')) return;
+        loadingTimer = setTimeout(() => {
+          loadingTimer = undefined;
+          if (failed || map.loaded()) return;
+          loading.classList.add('active');
+          sheet.setAttribute('aria-busy', 'true');
+        }, 300);
+      });
+      map.on('idle', stopLoading);
       map.on('webglcontextlost', () => { failed = true; note(); });
       // Wheel zoom ends without an original event, so our own moves are marked instead.
       map.on('moveend', () => {
         if (guard || generating) return;
         if (flying) { flying = false; return; }
-        const center = map.getCenter().wrap();
+        const now = map.getCenter();
+        if (ownCamera && now.lng === ownCamera.lng && now.lat === ownCamera.lat && map.getZoom() === ownCamera.zoom) return;
+        ownCamera = null;
+        const center = now.wrap();
         const lat = Number(center.lat.toFixed(4));
         const lon = Number(center.lng.toFixed(4));
         const span = Math.min(config.max_span, Math.max(500, Math.round(spanForZoom(map.getZoom(), lat, longSide()) / 100) * 100));
+        // MapLibre 6 delivers move events after our own jumpTo and limit changes, so the guard
+        // flag misses them. Stopping when nothing changed ends that chain of events.
+        // The form may hold more decimals than the map writes, so compare at the map's precision.
+        const round = (value, digits) => (value == null ? value : Number(Number(value).toFixed(digits)));
+        if (lat === round(state.latitude, 4) && lon === round(state.longitude, 4)
+          && span === Math.round(state.span / 100) * 100) return;
         state = { ...state, latitude: lat, longitude: lon, span };
         onMapChange({ latitude: lat, longitude: lon, span });
         syncMap();
@@ -356,6 +391,6 @@ export function createPreview({ initial, config, onMapChange, onMarkersChange, o
     },
     setSelected(index) { selected = index; drawMarks(); },
     setResult(value) { result = value; if (value) endDrag(); drawMarks(); },
-    destroy() { observer.disconnect(); window.removeEventListener('resize', resize); map?.remove(); },
+    destroy() { stopLoading(); observer.disconnect(); window.removeEventListener('resize', resize); map?.remove(); },
   };
 }
