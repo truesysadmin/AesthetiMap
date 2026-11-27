@@ -45,6 +45,22 @@ jobs:
       - run: npm run build
       - run: npm audit --audit-level=high
 
+  frontend-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run test:e2e
+
   docker:
     runs-on: ubuntu-latest
     steps:
