@@ -17,6 +17,9 @@ const types = {
 let server, browser, origin;
 let tileDelay = 0;
 const location = '/?city=Kyiv&latitude=50.4501&longitude=30.5234';
+// CI renders WebGL in software, so one input step can take several seconds.
+// The freeze this guards against never ends, so a generous bound still catches it.
+const step = 20000;
 
 async function bounded(work, ms, message) {
   let timer;
@@ -30,7 +33,7 @@ async function bounded(work, ms, message) {
   }
 }
 
-async function alive(page, ms = 5000) {
+async function alive(page, ms = step) {
   return bounded(page.evaluate(() => 1).then(() => true), ms, 'Renderer is unresponsive').catch(() => false);
 }
 
@@ -77,9 +80,15 @@ after(async () => {
 }, { timeout: 15000 });
 
 async function openPage(t) {
-  const page = await bounded(browser.newPage({ viewport: { width: 1600, height: 1000 }, serviceWorkers: 'block' }), 10000, 'Could not open page');
+  const page = await bounded(browser.newPage({ viewport: { width: 1024, height: 700 }, serviceWorkers: 'block' }), 10000, 'Could not open page');
   t.after(() => bounded(page.close(), 10000, 'Page cleanup timed out'));
   page.setDefaultTimeout(10000);
+  // Count animation frames: a map at rest asks for none, the event loop behind the freeze never stops asking.
+  await page.addInitScript(() => {
+    window.__frames = 0;
+    const request = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = callback => { window.__frames++; return request(callback); };
+  });
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.origin === origin) return route.continue();
@@ -114,38 +123,50 @@ async function drag(page, point, steps = 12) {
       await pause(16);
     }
     await page.mouse.up();
-  })(), 6000, 'Drag timed out; the renderer may be frozen');
+  })(), step, 'Drag timed out; the renderer may be frozen');
 }
 
 async function wheel(page, count, delta) {
   for (let i = 0; i < count; i++) {
-    await bounded(page.mouse.wheel(0, delta), 5000, 'Wheel input timed out; the renderer may be frozen');
+    await bounded(page.mouse.wheel(0, delta), step, 'Wheel input timed out; the renderer may be frozen');
     await pause(30);
   }
 }
 
-test('zooming in and dragging does not freeze the page', { timeout: 120000 }, async t => {
+// The freeze depends on timing and GPU rendering,
+// so the scenario runs twice on fresh pages.
+test('zooming in and dragging does not freeze the page', { timeout: 600000 }, async t => {
   tileDelay = 0;
-  const page = await openPage(t);
-  await bounded(page.waitForFunction(() => performance.getEntriesByName('preview-idle').length, null, { timeout: 30000 }), 31000, 'Map did not become idle; the renderer may be frozen');
-  const point = await center(page);
-  await bounded(page.mouse.move(point.x, point.y), 5000, 'Mouse input timed out');
-  await wheel(page, 80, -300);
-  await pause(1500);
-  assert.ok(await alive(page), 'The renderer froze after zooming in');
-  assert.equal(await bounded(page.locator('#span').inputValue(), 5000, 'Reading span timed out'), '500');
-  for (let round = 0; round < 8; round++) {
-    await drag(page, point);
-    assert.ok(await alive(page), `The renderer froze after drag ${round + 1}`);
-    await wheel(page, 4, round % 2 ? 300 : -300);
-    await pause(500);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const page = await openPage(t);
+    await bounded(page.waitForFunction(() => performance.getEntriesByName('preview-idle').length, null, { timeout: 30000 }), 31000, 'Map did not become idle; the renderer may be frozen');
+    const point = await center(page);
+    await bounded(page.mouse.move(point.x, point.y), 5000, 'Mouse input timed out');
+    await wheel(page, 80, -300);
+    await pause(1500);
+    assert.ok(await alive(page), `The renderer froze after zooming in (attempt ${attempt})`);
+    assert.equal(await bounded(page.locator('#span').inputValue(), 5000, 'Reading span timed out'), '500');
+    for (let round = 0; round < 8; round++) {
+      await drag(page, point);
+      assert.ok(await alive(page), `The renderer froze after drag ${round + 1} (attempt ${attempt})`);
+      await wheel(page, 4, round % 2 ? 300 : -300);
+      await pause(500);
+    }
+    assert.ok(await alive(page), `The renderer froze after repeated zooming and dragging (attempt ${attempt})`);
+    await bounded(page.waitForFunction(() => !document.getElementById('sheet').hasAttribute('aria-busy'), null, { timeout: 30000 }), step + 30000, 'The map kept loading after input stopped');
+    await pause(3000);
+    const frames = () => bounded(page.evaluate(() => window.__frames), step, 'Reading frame count timed out; the renderer may be frozen');
+    const start = await frames();
+    await pause(3000);
+    const extra = (await frames()) - start;
+    assert.ok(extra < 10, `The map kept redrawing at rest (${extra} frames in 3 s): its camera events are looping`);
+    const latitude = Number.parseFloat(await bounded(page.locator('#latitude').inputValue(), 5000, 'Reading latitude timed out'));
+    assert.ok(Number.isFinite(latitude) && Math.abs(latitude - 50.45) < 1, `Latitude drifted unexpectedly: ${latitude}`);
+    await bounded(page.close(), 10000, 'Page cleanup timed out');
   }
-  assert.ok(await alive(page), 'The renderer froze after repeated zooming and dragging');
-  const latitude = Number.parseFloat(await bounded(page.locator('#latitude').inputValue(), 5000, 'Reading latitude timed out'));
-  assert.ok(Number.isFinite(latitude) && Math.abs(latitude - 50.45) < 1, `Latitude drifted unexpectedly: ${latitude}`);
 });
 
-test('the loading bar shows while tiles load and hides when the map is idle', { timeout: 120000 }, async t => {
+test('the loading bar shows while tiles load and hides when the map is idle', { timeout: 600000 }, async t => {
   tileDelay = 2000;
   t.after(() => { tileDelay = 0; });
   const page = await openPage(t);

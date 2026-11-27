@@ -46,8 +46,9 @@ jobs:
       - run: npm audit --audit-level=high
 
   frontend-e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The freeze shows up only with GPU rendering; Linux runners render in software and miss it.
+    runs-on: macos-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: frontend
@@ -57,9 +58,10 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
       - run: npm run build
       - run: npm run test:e2e
+        env:
+          E2E_CHANNEL: chrome
 
   docker:
     runs-on: ubuntu-latest
